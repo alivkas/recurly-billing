@@ -6,11 +6,12 @@ import lombok.Setter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 @Getter
 @Setter
 public class SubscriptionResponse {
-    private String id;
+    private UUID id;
     private String status;
     private LocalDate currentPeriodStart;
     private LocalDate currentPeriodEnd;

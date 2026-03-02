@@ -6,11 +6,12 @@ import lombok.Setter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 @Getter
 @Setter
 public class PlanResponse {
-    private String id;
+    private UUID id;
     private String code;
     private String name;
     private Long priceCents;
