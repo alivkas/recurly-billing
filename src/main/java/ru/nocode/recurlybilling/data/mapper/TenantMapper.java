@@ -7,7 +7,7 @@ import ru.nocode.recurlybilling.data.entities.Tenant;
 
 @Mapper(componentModel = "spring")
 public interface TenantMapper {
-    TenantMapper INSTANCE = Mappers.getMapper(TenantMapper.class);
-
-    TenantOnboardingResponse toOnboardingResponse(Tenant tenant);
+//    TenantMapper INSTANCE = Mappers.getMapper(TenantMapper.class);
+//
+//    TenantOnboardingResponse toOnboardingResponse(Tenant tenant);
 }

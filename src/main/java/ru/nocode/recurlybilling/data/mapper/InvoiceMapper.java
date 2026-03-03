@@ -8,7 +8,7 @@ import ru.nocode.recurlybilling.data.entities.Invoice;
 
 @Mapper(componentModel = "spring")
 public interface InvoiceMapper {
-    InvoiceMapper INSTANCE = Mappers.getMapper(InvoiceMapper.class);
-
-    InvoiceResponse toResponse(Invoice invoice);
+//    InvoiceMapper INSTANCE = Mappers.getMapper(InvoiceMapper.class);
+//
+//    InvoiceResponse toResponse(Invoice invoice);
 }

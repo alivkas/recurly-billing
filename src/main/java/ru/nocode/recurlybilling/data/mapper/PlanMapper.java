@@ -9,9 +9,9 @@ import ru.nocode.recurlybilling.data.entities.Plan;
 
 @Mapper(componentModel = "spring")
 public interface PlanMapper {
-    PlanMapper INSTANCE = Mappers.getMapper(PlanMapper.class);
-
-    PlanResponse toResponse(Plan plan);
-
-    Plan toEntity(PlanCreateRequest request);
+//    PlanMapper INSTANCE = Mappers.getMapper(PlanMapper.class);
+//
+//    PlanResponse toResponse(Plan plan);
+//
+//    Plan toEntity(PlanCreateRequest request);
 }
