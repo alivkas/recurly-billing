@@ -1,0 +1,41 @@
+package ru.nocode.recurlybilling.data.entities;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "tenants", uniqueConstraints = @UniqueConstraint(columnNames = "tenant_id"))
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Tenant {
+
+    @Id
+    private String tenantId;
+
+    @Column(nullable = false)
+    private String name;
+
+    @Column(name = "contact_email")
+    private byte[] contactEmail;
+
+    @Column(name = "api_key_hash", nullable = false)
+    private String apiKeyHash;
+
+    @Column(name = "is_active")
+    private Boolean isActive = true;
+
+    @CreationTimestamp
+    @Column(name = "created_at")
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+}
