@@ -1,9 +1,7 @@
 package ru.nocode.recurlybilling.data.entities;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.hibernate.annotations.*;
 import org.hibernate.type.SqlTypes;
 import tools.jackson.databind.JsonNode;
@@ -17,6 +15,8 @@ import java.util.UUID;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Getter
+@Setter
 public class Plan {
 
     @Id

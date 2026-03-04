@@ -9,9 +9,9 @@ import ru.nocode.recurlybilling.data.entities.Subscription;
 
 @Mapper(componentModel = "spring")
 public interface SubscriptionMapper {
-    SubscriptionMapper INSTANCE = Mappers.getMapper(SubscriptionMapper.class);
-
-    SubscriptionResponse toResponse(Subscription subscription);
-
-    Subscription toEntity(SubscriptionCreateRequest request);
+//    SubscriptionMapper INSTANCE = Mappers.getMapper(SubscriptionMapper.class);
+//
+//    SubscriptionResponse toResponse(Subscription subscription);
+//
+//    Subscription toEntity(SubscriptionCreateRequest request);
 }
