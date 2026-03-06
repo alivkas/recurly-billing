@@ -50,6 +50,9 @@ public class Plan {
     @Column(name = "trial_days")
     private Integer trialDays = 0;
 
+    @Column(name = "start_date")
+    private LocalDate startDate;
+
     @Column(name = "end_date")
     private LocalDate endDate;
 

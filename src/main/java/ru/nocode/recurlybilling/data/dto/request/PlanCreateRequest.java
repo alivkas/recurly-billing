@@ -23,6 +23,7 @@ public record PlanCreateRequest(
         @Min(1)
         Integer intervalCount,
         Integer trialDays,
+        LocalDate startDate,
         LocalDate endDate,
         Map<String, Object> metadata
 ) {}

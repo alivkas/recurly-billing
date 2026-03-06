@@ -14,6 +14,7 @@ public record PlanResponse(
         String interval,
         Integer intervalCount,
         Integer trialDays,
+        LocalDate startDate,
         LocalDate endDate,
         Map<String, Object> metadata,
         LocalDateTime createdAt
