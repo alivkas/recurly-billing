@@ -31,6 +31,7 @@ public class Customer {
 
     private byte[] email;
     private byte[] fullName;
+    private byte[] phone;
 
     @Column(name = "is_student")
     private Boolean isStudent = true;
