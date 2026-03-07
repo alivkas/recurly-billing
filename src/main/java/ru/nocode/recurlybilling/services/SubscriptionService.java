@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCancelRequest;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCreateRequest;
@@ -35,7 +36,7 @@ public class SubscriptionService {
     private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
 
-    @Transactional
+    @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request) {
         Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, request.customerId())
                 .orElseThrow(() -> new IllegalArgumentException("Customer with externalId '" + request.customerId() + "' not found"));
@@ -132,10 +133,10 @@ public class SubscriptionService {
                     subscriptionId, "failed"
             );
             if (!failedInvoices.isEmpty()) {
-                paymentService.retryFailedPayment(failedInvoices.get(0).getId());
+                log.warn("Retry logic not implemented yet for subscription {}", subscriptionId);
             }
         } catch (Exception e) {
-            log.warn("Failed to retry payment for subscription {}: {}", subscriptionId, e.getMessage());
+            log.warn("Failed to handle payment failure for subscription {}: {}", subscriptionId, e.getMessage());
         }
     }
 

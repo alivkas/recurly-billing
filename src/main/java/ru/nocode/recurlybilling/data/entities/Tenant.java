@@ -31,6 +31,15 @@ public class Tenant {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    @Column(name = "payment_return_url")
+    private String paymentReturnUrl;
+
+    @Column(name = "yookassa_shop_id")
+    private String yooKassaShopId;
+
+    @Column(name = "yookassa_secret_key", columnDefinition = "bytea")
+    private byte[] yooKassaSecretKey;
+
     @CreationTimestamp
     @Column(name = "created_at")
     private LocalDateTime createdAt;
