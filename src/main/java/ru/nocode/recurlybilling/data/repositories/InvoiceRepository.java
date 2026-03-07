@@ -13,4 +13,6 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
     List<Invoice> findByTenantId(String tenantId);
     List<Invoice> findBySubscriptionId(UUID subscriptionId);
     Optional<Invoice> findByPaymentId(String paymentId);
+    List<Invoice> findByStatusAndAttemptCountLessThan(String status, int maxAttempts);
+    List<Invoice> findBySubscriptionIdAndStatusOrderByCreatedAtDesc(UUID id, String status);
 }

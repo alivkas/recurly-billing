@@ -3,8 +3,11 @@ package ru.nocode.recurlybilling.data.entities;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.type.SqlTypes;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -43,6 +46,13 @@ public class Invoice {
 
     @Column(name = "attempt_count")
     private Integer attemptCount = 0;
+
+    @Column(name = "description")
+    private String description;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private JsonNode metadata;
 
     @CreationTimestamp
     @Column(name = "created_at")

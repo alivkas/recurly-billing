@@ -7,9 +7,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCancelRequest;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCreateRequest;
+import ru.nocode.recurlybilling.data.dto.response.PaymentResponse;
 import ru.nocode.recurlybilling.data.dto.response.SubscriptionResponse;
 import ru.nocode.recurlybilling.data.entities.Customer;
-import ru.nocode.recurlybilling.data.entities.Invoice;
 import ru.nocode.recurlybilling.data.entities.Plan;
 import ru.nocode.recurlybilling.data.entities.Subscription;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
@@ -17,6 +17,7 @@ import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,7 +54,7 @@ class SubscriptionServiceTest {
         UUID planId = UUID.randomUUID();
         String planIdStr = planId.toString();
 
-        var request = new SubscriptionCreateRequest("user_12345", planIdStr, LocalDate.of(2025, 9, 1));
+        var request = new SubscriptionCreateRequest("user_12345", planIdStr, LocalDate.of(2025, 9, 1), "sbp");
 
         Customer customer = new Customer();
         customer.setId(UUID.randomUUID());
@@ -74,8 +75,18 @@ class SubscriptionServiceTest {
                 .thenReturn(java.util.Collections.emptyList());
         when(subscriptionRepository.save(any(Subscription.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
+
+        // Исправлено: возвращаем PaymentResponse вместо Invoice
+        PaymentResponse mockPaymentResponse = new PaymentResponse(
+                "pay_123",
+                "pending",
+                "https://yoomoney.ru/checkout",
+                400000L,
+                "RUB",
+                LocalDateTime.now()
+        );
         when(paymentService.createPaymentForSubscription(any(Subscription.class)))
-                .thenReturn(new Invoice());
+                .thenReturn(mockPaymentResponse);
 
         SubscriptionResponse response = subscriptionService.createSubscription(tenantId, request);
 
@@ -86,13 +97,12 @@ class SubscriptionServiceTest {
 
     @Test
     void createSubscriptionWithMonthlyPlanShouldSetNextBillingDate() {
-        // given
         String tenantId = "moscow_digital_school";
 
         UUID planId = UUID.randomUUID();
         String planIdStr = planId.toString();
 
-        var request = new SubscriptionCreateRequest("user_12345", planIdStr, LocalDate.of(2025, 1, 1));
+        var request = new SubscriptionCreateRequest("user_12345", planIdStr, LocalDate.of(2025, 1, 1), "sbp");
 
         Customer customer = new Customer();
         customer.setId(UUID.randomUUID());
@@ -118,8 +128,17 @@ class SubscriptionServiceTest {
                     saved.setId(UUID.randomUUID());
                     return saved;
                 });
+
+        PaymentResponse mockPaymentResponse = new PaymentResponse(
+                "pay_123",
+                "pending",
+                "https://yoomoney.ru/checkout",
+                100000L,
+                "RUB",
+                LocalDateTime.now()
+        );
         when(paymentService.createPaymentForSubscription(any(Subscription.class)))
-                .thenReturn(new Invoice());
+                .thenReturn(mockPaymentResponse);
 
         SubscriptionResponse response = subscriptionService.createSubscription(tenantId, request);
 

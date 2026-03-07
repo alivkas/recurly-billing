@@ -1,17 +1,18 @@
 package ru.nocode.recurlybilling.services;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCancelRequest;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCreateRequest;
 import ru.nocode.recurlybilling.data.dto.response.SubscriptionResponse;
 import ru.nocode.recurlybilling.data.entities.Customer;
+import ru.nocode.recurlybilling.data.entities.Invoice;
 import ru.nocode.recurlybilling.data.entities.Plan;
 import ru.nocode.recurlybilling.data.entities.Subscription;
-import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
-import ru.nocode.recurlybilling.data.repositories.PlanRepository;
-import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
+import ru.nocode.recurlybilling.data.repositories.*;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
@@ -19,7 +20,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SubscriptionService {
@@ -28,6 +31,8 @@ public class SubscriptionService {
     private final CustomerRepository customerRepository;
     private final PlanRepository planRepository;
     private final PaymentService paymentService;
+    private final InvoiceRepository invoiceRepository;
+    private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -51,6 +56,7 @@ public class SubscriptionService {
         subscription.setPlanId(plan.getId());
         subscription.setStatus("active");
         subscription.setCurrentPeriodStart(request.startDate() != null ? request.startDate() : LocalDate.now());
+        subscription.setPaymentMethod(request.paymentMethod() != null ? request.paymentMethod() : "bank_card");
 
         calculateSubscriptionDates(subscription, plan, request.startDate());
 
@@ -110,25 +116,7 @@ public class SubscriptionService {
         List<Subscription> subscriptions = subscriptionRepository.findByTenantIdAndCustomerExternalId(tenantId, externalId);
         return subscriptions.stream()
                 .map(this::convertToResponse)
-                .toList();
-    }
-
-    @Transactional
-    public void handlePaymentSuccess(UUID subscriptionId, String paymentId) {
-        Subscription subscription = subscriptionRepository.findById(subscriptionId)
-                .orElseThrow(() -> new IllegalArgumentException("Subscription not found"));
-
-        Plan plan = planRepository.findById(subscription.getPlanId())
-                .orElseThrow(() -> new IllegalStateException("Plan not found"));
-
-        subscription.setCurrentPeriodStart(subscription.getCurrentPeriodEnd().plusDays(1));
-        subscription.setCurrentPeriodEnd(calculateNextPeriodEnd(subscription.getCurrentPeriodStart(), plan));
-
-        if (subscription.getNextBillingDate() != null) {
-            subscription.setNextBillingDate(subscription.getCurrentPeriodEnd().plusDays(1));
-        }
-
-        subscriptionRepository.save(subscription);
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -139,19 +127,46 @@ public class SubscriptionService {
         subscription.setStatus("past_due");
         subscriptionRepository.save(subscription);
 
-        // TODO: отправить уведомление, попробовать повторить платеж
+        try {
+            List<Invoice> failedInvoices = invoiceRepository.findBySubscriptionIdAndStatusOrderByCreatedAtDesc(
+                    subscriptionId, "failed"
+            );
+            if (!failedInvoices.isEmpty()) {
+                paymentService.retryFailedPayment(failedInvoices.get(0).getId());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to retry payment for subscription {}: {}", subscriptionId, e.getMessage());
+        }
     }
 
-    // TODO Scheduled
+    @Scheduled(cron = "0 0 2 * * *", zone = "Europe/Moscow")
     @Transactional
-    public void processScheduledBilling(String tenantId) {
+    public void processScheduledBilling() {
+        List<String> tenantIds = tenantRepository.findAllActiveTenantIds();
+
+        for (String tenantId : tenantIds) {
+            try {
+                processBillingForTenant(tenantId);
+            } catch (Exception e) {
+                log.error("Error processing billing for tenant {}", tenantId, e);
+            }
+        }
+    }
+
+    @Transactional
+    public void processBillingForTenant(String tenantId) {
         LocalDate today = LocalDate.now();
 
         List<Subscription> dueSubscriptions = subscriptionRepository
                 .findByTenantIdAndStatusAndNextBillingDateBefore(tenantId, "active", today.plusDays(1));
 
         for (Subscription subscription : dueSubscriptions) {
-            paymentService.createPaymentForSubscription(subscription);
+            try {
+                paymentService.createPaymentForSubscription(subscription);
+                log.info("Scheduled payment created for subscription {}", subscription.getId());
+            } catch (Exception e) {
+                log.error("Failed to create scheduled payment for subscription {}", subscription.getId(), e);
+            }
         }
     }
 
@@ -159,13 +174,16 @@ public class SubscriptionService {
         LocalDate start = startDate != null ? startDate : LocalDate.now();
         subscription.setCurrentPeriodStart(start);
 
-        LocalDate periodEnd = calculateNextPeriodEnd(start, plan);
-        subscription.setCurrentPeriodEnd(periodEnd);
+        if (plan.getEndDate() != null) {
+            subscription.setCurrentPeriodEnd(plan.getEndDate());
+        } else {
+            subscription.setCurrentPeriodEnd(calculateNextPeriodEnd(start, plan));
+        }
 
         if ("semester".equals(plan.getInterval()) || "custom".equals(plan.getInterval())) {
             subscription.setNextBillingDate(null);
         } else {
-            subscription.setNextBillingDate(periodEnd.plusDays(1));
+            subscription.setNextBillingDate(subscription.getCurrentPeriodEnd().plusDays(1));
         }
     }
 
@@ -176,11 +194,9 @@ public class SubscriptionService {
             case "semester" -> {
                 if (start.getMonthValue() >= 9) {
                     yield LocalDate.of(start.getYear(), 12, 31);
-                }
-                else if (start.getMonthValue() >= 2) {
+                } else if (start.getMonthValue() >= 2) {
                     yield LocalDate.of(start.getYear(), 5, 31);
-                }
-                else {
+                } else {
                     yield LocalDate.of(start.getYear() + 1, 12, 31);
                 }
             }
