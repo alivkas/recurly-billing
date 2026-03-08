@@ -9,6 +9,7 @@ import ru.nocode.recurlybilling.data.entities.Customer;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -17,6 +18,7 @@ public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final EncryptionService encryptionService;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public CustomerResponse createCustomer(String tenantId, CustomerCreateRequest request) {
@@ -44,6 +46,18 @@ public class CustomerService {
         customer.setCreatedAt(LocalDateTime.now());
 
         Customer saved = customerRepository.save(customer);
+
+        auditLogService.logEvent(
+                tenantId,
+                "system",
+                "CREATE_CUSTOMER",
+                "CUSTOMER",
+                saved.getId().toString(),
+                null,
+                Map.of("externalId", request.externalId()),
+                null,
+                null
+        );
 
         return new CustomerResponse(
                 saved.getId().toString(),
