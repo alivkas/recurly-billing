@@ -35,6 +35,7 @@ public class SubscriptionService {
     private final InvoiceRepository invoiceRepository;
     private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
+    private final AuditLogService auditLogService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request) {
@@ -74,6 +75,18 @@ public class SubscriptionService {
         }
 
         Subscription saved = subscriptionRepository.save(subscription);
+
+        auditLogService.logEvent(
+                tenantId,
+                request.customerId(),
+                "CREATE_SUBSCRIPTION",
+                "SUBSCRIPTION",
+                saved.getId().toString(),
+                null,
+                Map.of("planId", request.planId(), "startDate", request.startDate()),
+                null,
+                null
+        );
 
         if (!"trialing".equals(saved.getStatus())) {
             paymentService.createPaymentForSubscription(saved);
