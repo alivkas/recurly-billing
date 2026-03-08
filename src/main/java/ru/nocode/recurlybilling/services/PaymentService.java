@@ -19,7 +19,6 @@ import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
 import tools.jackson.databind.ObjectMapper;
 
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -66,7 +65,7 @@ public class PaymentService {
             YooKassaPaymentRequest request = buildYooKassaRequest(savedInvoice, subscription, plan);
             response = yooKassaClient.createPayment(request);
         } catch (HttpClientErrorException e) {
-            handleYooKassaClientError(e);
+            handleYooKassaClientError(e, savedInvoice);
             throw new RuntimeException("Payment rejected by YooKassa: " + e.getResponseBodyAsString(), e);
         } catch (RestClientException e) {
             savedInvoice.setStatus("failed");
@@ -143,8 +142,7 @@ public class PaymentService {
         }
     }
 
-    private void handleYooKassaClientError(HttpClientErrorException e) {
-        Invoice invoice = new Invoice();
+    private void handleYooKassaClientError(HttpClientErrorException e, Invoice invoice) {
         invoice.setStatus("failed");
         invoice.setUpdatedAt(LocalDateTime.now());
 
