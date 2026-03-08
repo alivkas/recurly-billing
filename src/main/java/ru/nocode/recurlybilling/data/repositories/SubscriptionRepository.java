@@ -19,7 +19,21 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
     List<Subscription> findByTenantIdAndStatusAndNextBillingDateBefore(
             String tenantId, String status, LocalDate date
     );
+    List<Subscription> findByTenantId(String tenantId);
     List<Subscription> findByTenantIdAndStatus(String tenantId, String status);
     Optional<Subscription> findByIdAndTenantId(UUID id, String tenantId);
     List<Subscription> findByTenantIdAndCustomerId(String tenantId, UUID customerId);
+    @Query("SELECT COUNT(s) FROM Subscription s WHERE s.tenantId = :tenantId AND s.status = 'active'")
+    long countByTenantIdAndStatus(String tenantId, String status);
+
+    @Query("SELECT COUNT(s) FROM Subscription s " +
+            "WHERE s.tenantId = :tenantId AND s.createdAt <= :date AND " +
+            "(s.status = 'active' OR s.status = 'trialing' OR " +
+            "(s.status = 'cancelled' AND s.cancelAt > :date))")
+    long countActiveSubscriptionsAtDate(String tenantId, LocalDate date);
+
+    @Query("SELECT COUNT(s) FROM Subscription s " +
+            "WHERE s.tenantId = :tenantId AND s.status = 'cancelled' AND " +
+            "s.cancelAt BETWEEN :startDate AND :endDate")
+    long countCancelledSubscriptionsInPeriod(String tenantId, LocalDate startDate, LocalDate endDate);
 }
