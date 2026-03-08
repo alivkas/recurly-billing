@@ -10,4 +10,5 @@ import ru.nocode.recurlybilling.data.entities.Notification;
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
     List<Notification> findByTenantId(String tenantId);
     List<Notification> findBySubscriptionId(UUID subscriptionId);
+    List<Notification> findByStatus(String status);
 }
