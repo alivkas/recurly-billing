@@ -9,4 +9,7 @@ import ru.nocode.recurlybilling.data.entities.WebhookEvent;
 @Repository
 public interface WebhookEventRepository extends JpaRepository<WebhookEvent, UUID> {
     List<WebhookEvent> findByTenantId(String tenantId);
+    List<WebhookEvent> findByPaymentId(String paymentId);
+    List<WebhookEvent> findByStatus(String status);
+    long countByTenantIdAndEventType(String tenantId, String eventType);
 }

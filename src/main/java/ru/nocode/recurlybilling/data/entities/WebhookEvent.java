@@ -4,25 +4,23 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
 import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-@Entity
-@Table(name = "webhook_events")
-@Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter
 @Setter
+@Data
+@Entity
+@Table(name = "webhook_events")
 public class WebhookEvent {
 
     @Id
     @GeneratedValue
-    @UuidGenerator
     private UUID id;
 
     @Column(name = "tenant_id", nullable = false)
@@ -31,17 +29,24 @@ public class WebhookEvent {
     @Column(name = "event_type", nullable = false)
     private String eventType;
 
+    @Column(name = "payment_id")
+    private String paymentId;
+
+    @Column(name = "signature", nullable = false)
+    private String signature;
+
+    @Column(columnDefinition = "text")
+    private String rawRequestBody;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    private JsonNode rawPayload;
+    private JsonNode parsedBody;
 
-    @Column(name = "signature_valid", nullable = false)
-    private Boolean signatureValid;
+    @Column(nullable = false)
+    private String status; // received, processed, failed
 
-    @Column(name = "processed_at")
-    private LocalDateTime processedAt;
-
-    private String error;
+    @Column(name = "processing_error", columnDefinition = "text")
+    private String processingError;
 
     @CreationTimestamp
     @Column(name = "created_at")
