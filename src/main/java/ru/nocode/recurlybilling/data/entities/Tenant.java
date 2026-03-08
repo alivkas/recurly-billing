@@ -38,7 +38,7 @@ public class Tenant {
     private String yooKassaShopId;
 
     @Column(name = "yookassa_secret_key", columnDefinition = "text")
-    private byte[] yooKassaSecretKey;
+    private String yooKassaSecretKey;
 
     @CreationTimestamp
     @Column(name = "created_at")

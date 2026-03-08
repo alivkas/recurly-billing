@@ -4,9 +4,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import ru.nocode.recurlybilling.data.dto.request.YooKassaPaymentRequest;
 import ru.nocode.recurlybilling.data.dto.response.YooKassaPaymentResponse;
+import ru.nocode.recurlybilling.data.entities.Tenant;
 
 import java.util.Base64;
 import java.util.List;

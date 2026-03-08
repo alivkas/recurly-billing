@@ -44,6 +44,9 @@ public class Invoice {
     @Column(name = "payment_method")
     private String paymentMethod;
 
+    @Column(name = "confirmation_url", columnDefinition = "text")
+    private String confirmationUrl;
+
     @Column(name = "attempt_count")
     private Integer attemptCount = 0;
 

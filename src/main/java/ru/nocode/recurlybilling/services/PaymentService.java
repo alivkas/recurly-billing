@@ -23,10 +23,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @Slf4j
 @Service
@@ -50,19 +47,40 @@ public class PaymentService {
         invoice.setSubscriptionId(subscription.getId());
         invoice.setAmountCents(plan.getPriceCents());
         invoice.setStatus("pending");
-
         validatePaymentMethod(subscription.getPaymentMethod());
         invoice.setPaymentMethod(subscription.getPaymentMethod());
-
         invoice.setAttemptCount(0);
         invoice.setCreatedAt(LocalDateTime.now());
 
         Invoice savedInvoice = invoiceRepository.save(invoice);
 
-        YooKassaPaymentResponse response;
         try {
             YooKassaPaymentRequest request = buildYooKassaRequest(savedInvoice, subscription, plan);
-            response = yooKassaClient.createPayment(request, idempotencyKey);
+
+            YooKassaPaymentResponse response = yooKassaClient.createPayment(request, idempotencyKey);
+
+            String confirmationUrl = null;
+            if (response.getConfirmation() != null &&
+                    "redirect".equals(response.getConfirmation().getType())) {
+                confirmationUrl = response.getConfirmation().getConfirmationUrl();
+            }
+
+            savedInvoice.setPaymentId(response.getId());
+            savedInvoice.setStatus(mapYooKassaStatus(response.getStatus()));
+            savedInvoice.setConfirmationUrl(confirmationUrl);
+            savedInvoice.setUpdatedAt(LocalDateTime.now());
+
+            invoiceRepository.save(savedInvoice);
+
+            return new PaymentResponse(
+                    response.getId(),
+                    savedInvoice.getStatus(),
+                    confirmationUrl,
+                    savedInvoice.getAmountCents(),
+                    "RUB",
+                    response.getCreatedAt()
+            );
+
         } catch (HttpClientErrorException e) {
             handleYooKassaClientError(e, savedInvoice);
             throw new RuntimeException("Payment rejected by YooKassa: " + e.getResponseBodyAsString(), e);
@@ -72,27 +90,16 @@ public class PaymentService {
             invoiceRepository.save(savedInvoice);
             throw new RuntimeException("YooKassa unavailable", e);
         }
-
-        String mappedStatus = mapYooKassaStatus(response.getStatus());
-        savedInvoice.setPaymentId(response.getId());
-        savedInvoice.setStatus(mappedStatus);
-        savedInvoice.setUpdatedAt(LocalDateTime.now());
-        invoiceRepository.save(savedInvoice);
-
-        return new PaymentResponse(
-                response.getId(),
-                mappedStatus,
-                response.getConfirmation() != null ? response.getConfirmation().getConfirmationUrl() : null,
-                plan.getPriceCents(),
-                "RUB",
-                response.getCreatedAt()
-        );
     }
 
     @Transactional
-    public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> metadata) {
+    public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> metadata, String tenantId) {
         Invoice invoice = invoiceRepository.findByPaymentId(paymentId)
                 .orElseThrow(() -> new IllegalArgumentException("Invoice with paymentId '" + paymentId + "' not found"));
+
+        if (!invoice.getTenantId().equals(tenantId)) {
+            throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
+        }
 
         String oldStatus = invoice.getStatus();
         String mappedStatus = mapYooKassaStatus(status);
@@ -108,7 +115,46 @@ public class PaymentService {
         }
 
         invoiceRepository.save(invoice);
-        log.info("Webhook processed: paymentId={}, oldStatus={}, newStatus={}", paymentId, oldStatus, mappedStatus);
+        log.info("Webhook processed: paymentId={}, oldStatus={}, newStatus={}, tenant={}",
+                paymentId, oldStatus, mappedStatus, tenantId);
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentResponse getPaymentByTenant(String paymentId, String tenantId) {
+        Invoice invoice = invoiceRepository.findByPaymentId(paymentId)
+                .orElseThrow(() -> new IllegalStateException("Payment not found"));
+
+        if (!invoice.getTenantId().equals(tenantId)) {
+            throw new IllegalStateException("Payment does not belong to tenant");
+        }
+
+        return new PaymentResponse(
+                invoice.getPaymentId(),
+                invoice.getStatus(),
+                invoice.getConfirmationUrl(),
+                invoice.getAmountCents(),
+                "RUB",
+                invoice.getCreatedAt()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentResponse getLastPaymentForSubscription(UUID subscriptionId) {
+        List<Invoice> invoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId);
+
+        if (invoices.isEmpty()) {
+            return null;
+        }
+
+        Invoice latest = invoices.get(0);
+        return new PaymentResponse(
+                latest.getPaymentId(),
+                latest.getStatus(),
+                latest.getConfirmationUrl(),
+                latest.getAmountCents(),
+                "RUB",
+                latest.getCreatedAt()
+        );
     }
 
     private void extendSubscriptionPeriod(Invoice invoice) {

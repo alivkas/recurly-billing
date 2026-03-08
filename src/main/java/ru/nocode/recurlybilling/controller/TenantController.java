@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import ru.nocode.recurlybilling.data.dto.request.TenantOnboardingRequest;
+import ru.nocode.recurlybilling.data.dto.request.TenantPaymentSettingsRequest;
 import ru.nocode.recurlybilling.data.dto.response.TenantOnboardingResponse;
 import ru.nocode.recurlybilling.services.TenantService;
 
@@ -66,6 +67,28 @@ public class TenantController {
             return ResponseEntity.notFound().build();
         } catch (Exception e) {
             log.error("Error retrieving tenant: {}", tenantId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @PatchMapping("/payment-settings")
+    public ResponseEntity<Void> updatePaymentSettings(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestHeader("X-API-Key") String apiKey,
+            @Valid @RequestBody TenantPaymentSettingsRequest request) {
+
+        log.info("Updating payment settings for tenant: {}", tenantId);
+
+        try {
+            tenantService.validateTenantAndApiKey(tenantId, apiKey);
+            tenantService.updatePaymentSettings(tenantId, request);
+            log.info("Successfully updated payment settings for tenant: {}", tenantId);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid payment settings request for tenant {}: {}", tenantId, e.getMessage());
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            log.error("Error updating payment settings for tenant: {}", tenantId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }

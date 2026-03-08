@@ -49,7 +49,7 @@ public class YooKassaWebhookController {
                 String paymentId = (String) payment.get("id");
                 String status = (String) payment.get("status");
 
-                paymentService.handleYooKassaWebhook(paymentId, status, webhook);
+                //paymentService.handleYooKassaWebhook(paymentId, status, webhook);
             }
 
             return ResponseEntity.ok().build();

@@ -5,11 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.data.dto.request.TenantOnboardingRequest;
+import ru.nocode.recurlybilling.data.dto.request.TenantPaymentSettingsRequest;
 import ru.nocode.recurlybilling.data.dto.response.TenantOnboardingResponse;
 import ru.nocode.recurlybilling.data.entities.Tenant;
 import ru.nocode.recurlybilling.data.repositories.TenantRepository;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -81,6 +83,26 @@ public class TenantService {
             log.error("Decryption failed", e);
             throw new IllegalArgumentException("Invalid API key format", e);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<String> findTenantIdByYooKassaShopId(String shopId) {
+        return tenantRepository.findByYooKassaShopId(shopId)
+                .map(Tenant::getTenantId);
+    }
+
+    @Transactional
+    public void updatePaymentSettings(String tenantId, TenantPaymentSettingsRequest request) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Tenant not found: " + tenantId));
+
+        tenant.setYooKassaShopId(request.yookassaShopId());
+        tenant.setYooKassaSecretKey(encryptionService.encrypt(request.yookassaSecretKey()));
+
+        tenantRepository.save(tenant);
+
+        log.info("Updated YooKassa settings for tenant: {} (shopId: {})",
+                tenantId, request.yookassaShopId());
     }
 
     private String generateTenantId(String organizationName) {
