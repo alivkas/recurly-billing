@@ -1,9 +1,10 @@
 package ru.nocode.recurlybilling.data.dto.response;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public record CustomerResponse(
-        String id,
+        UUID id,
         String externalId,
         String email,
         String fullName,

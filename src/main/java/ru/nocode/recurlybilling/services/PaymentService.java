@@ -41,12 +41,11 @@ public class PaymentService {
     private final Environment environment;
 
     @Transactional
-    public PaymentResponse createPaymentForSubscription(Subscription subscription) {
+    public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) {
         Plan plan = planRepository.findById(subscription.getPlanId())
                 .orElseThrow(() -> new IllegalStateException("Plan not found for subscription"));
 
         Invoice invoice = new Invoice();
-        invoice.setId(UUID.randomUUID());
         invoice.setTenantId(subscription.getTenantId());
         invoice.setSubscriptionId(subscription.getId());
         invoice.setAmountCents(plan.getPriceCents());
@@ -63,7 +62,7 @@ public class PaymentService {
         YooKassaPaymentResponse response;
         try {
             YooKassaPaymentRequest request = buildYooKassaRequest(savedInvoice, subscription, plan);
-            response = yooKassaClient.createPayment(request);
+            response = yooKassaClient.createPayment(request, idempotencyKey);
         } catch (HttpClientErrorException e) {
             handleYooKassaClientError(e, savedInvoice);
             throw new RuntimeException("Payment rejected by YooKassa: " + e.getResponseBodyAsString(), e);

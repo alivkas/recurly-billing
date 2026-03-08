@@ -7,7 +7,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import ru.nocode.recurlybilling.data.dto.request.YooKassaPaymentRequest;
 import ru.nocode.recurlybilling.data.dto.response.YooKassaPaymentResponse;
-import tools.jackson.databind.ObjectMapper;
 
 import java.util.Base64;
 import java.util.List;
@@ -17,7 +16,6 @@ import java.util.List;
 public class YooKassaClient {
 
     private final RestTemplate restTemplate;
-    private final ObjectMapper objectMapper;
 
     @Value("${yookassa.shop-id}")
     private String shopId;
@@ -28,26 +26,23 @@ public class YooKassaClient {
     @Value("${yookassa.api-url:https://api.yookassa.ru/v3}")
     private String apiUrl;
 
-    public YooKassaPaymentResponse createPayment(YooKassaPaymentRequest request) {
-        String url = apiUrl + "/payments";
-
+    public YooKassaPaymentResponse createPayment(YooKassaPaymentRequest request, String idempotencyKey) {
         HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(
+                shopId,
+                secretKey
+        );
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
 
-        String auth = shopId + ":" + secretKey;
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-        headers.set("Authorization", "Basic " + encodedAuth);
+        headers.set("Idempotence-Key", idempotencyKey);
 
-        HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(request), headers);
-
+        HttpEntity<YooKassaPaymentRequest> entity = new HttpEntity<>(request, headers);
         ResponseEntity<YooKassaPaymentResponse> response = restTemplate.exchange(
-                url,
+                "https://api.yookassa.ru/v3/payments",
                 HttpMethod.POST,
                 entity,
                 YooKassaPaymentResponse.class
         );
-
         return response.getBody();
     }
 

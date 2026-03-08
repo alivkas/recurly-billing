@@ -1,6 +1,7 @@
 package ru.nocode.recurlybilling.services;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.data.dto.request.CustomerCreateRequest;
@@ -9,88 +10,65 @@ import ru.nocode.recurlybilling.data.entities.Customer;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
 
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.UUID;
+import java.util.List;
+import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final EncryptionService encryptionService;
-    private final AuditLogService auditLogService;
+    private final TenantService tenantService; // для валидации
 
     @Transactional
     public CustomerResponse createCustomer(String tenantId, CustomerCreateRequest request) {
         if (customerRepository.existsByTenantIdAndExternalId(tenantId, request.externalId())) {
-            throw new IllegalArgumentException("Customer with externalId '" + request.externalId() + "' already exists for tenant '" + tenantId + "'");
+            throw new IllegalArgumentException("Customer with externalId '" + request.externalId() + "' already exists");
         }
 
         Customer customer = new Customer();
-        customer.setId(UUID.randomUUID());
         customer.setTenantId(tenantId);
         customer.setExternalId(request.externalId());
-        customer.setIsStudent(request.isStudent() != null ? request.isStudent() : true);
-
-        if (request.email() != null && !request.email().isBlank()) {
-            customer.setEmail(encryptionService.encrypt(request.email()).getBytes());
-        }
-        if (request.fullName() != null && !request.fullName().isBlank()) {
-            customer.setFullName(encryptionService.encrypt(request.fullName()).getBytes());
-        }
-        if (request.phone() != null && !request.phone().isBlank()) {
-            customer.setPhone(encryptionService.encrypt(request.phone()).getBytes());
-        }
-
-        customer.setIsActive(true);
+        customer.setEmail(encryptionService.encrypt(request.email()));
+        customer.setFullName(encryptionService.encrypt(request.fullName()));
+        customer.setPhone(encryptionService.encrypt(request.phone()));
+        customer.setIsStudent(request.isStudent());
         customer.setCreatedAt(LocalDateTime.now());
 
         Customer saved = customerRepository.save(customer);
 
-        auditLogService.logEvent(
-                tenantId,
-                "system",
-                "CREATE_CUSTOMER",
-                "CUSTOMER",
-                saved.getId().toString(),
-                null,
-                Map.of("externalId", request.externalId()),
-                null,
-                null
-        );
-
-        return new CustomerResponse(
-                saved.getId().toString(),
-                saved.getExternalId(),
-                saved.getEmail() != null && saved.getEmail().length > 0 ? encryptionService.decrypt(Arrays.toString(saved.getEmail())) : null,
-                saved.getFullName() != null && saved.getFullName().length > 0 ? encryptionService.decrypt(Arrays.toString(saved.getFullName())) : null,
-                saved.getIsStudent(),
-                saved.getCreatedAt()
-        );
+        return convertToResponse(saved);
     }
 
     @Transactional(readOnly = true)
-    public CustomerResponse getCustomer(String tenantId, String externalId) {
+    public CustomerResponse getCustomerByExternalId(String tenantId, String externalId) {
         Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, externalId)
-                .orElseThrow(() -> new IllegalArgumentException("Customer with externalId '" + externalId + "' not found for tenant '" + tenantId + "'"));
+                .orElseThrow(() -> new IllegalArgumentException("Customer not found: " + externalId));
+        return convertToResponse(customer);
+    }
 
+    @Transactional(readOnly = true)
+    public List<CustomerResponse> getAllCustomers(String tenantId) {
+        List<Customer> customers = customerRepository.findByTenantId(tenantId);
+        return customers.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    public void validateTenantAndApiKey(String tenantId, String apiKey) {
+        tenantService.validateTenantAndApiKey(tenantId, apiKey);
+    }
+
+    private CustomerResponse convertToResponse(Customer customer) {
         return new CustomerResponse(
-                customer.getId().toString(),
+                customer.getId(),
                 customer.getExternalId(),
-                customer.getEmail() != null && customer.getEmail().length > 0 ? encryptionService.decrypt(Arrays.toString(customer.getEmail())) : null,
-                customer.getFullName() != null && customer.getFullName().length > 0 ? encryptionService.decrypt(Arrays.toString(customer.getFullName())) : null,
+                encryptionService.decrypt(customer.getEmail()),
+                encryptionService.decrypt(customer.getFullName()),
                 customer.getIsStudent(),
                 customer.getCreatedAt()
         );
-    }
-
-    @Transactional
-    public void deactivateCustomer(String tenantId, String externalId) {
-        Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, externalId)
-                .orElseThrow(() -> new IllegalArgumentException("Customer with externalId '" + externalId + "' not found for tenant '" + tenantId + "'"));
-
-        customer.setIsActive(false);
-        customerRepository.save(customer);
     }
 }

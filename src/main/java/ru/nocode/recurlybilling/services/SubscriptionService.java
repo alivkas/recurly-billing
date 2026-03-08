@@ -35,10 +35,10 @@ public class SubscriptionService {
     private final InvoiceRepository invoiceRepository;
     private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
-    private final AuditLogService auditLogService;
+    private final TenantService tenantService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request) {
+    public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) {
         Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, request.customerId())
                 .orElseThrow(() -> new IllegalArgumentException("Customer with externalId '" + request.customerId() + "' not found"));
 
@@ -52,7 +52,6 @@ public class SubscriptionService {
         }
 
         Subscription subscription = new Subscription();
-        subscription.setId(UUID.randomUUID());
         subscription.setTenantId(tenantId);
         subscription.setCustomerId(customer.getId());
         subscription.setPlanId(plan.getId());
@@ -76,20 +75,8 @@ public class SubscriptionService {
 
         Subscription saved = subscriptionRepository.save(subscription);
 
-        auditLogService.logEvent(
-                tenantId,
-                request.customerId(),
-                "CREATE_SUBSCRIPTION",
-                "SUBSCRIPTION",
-                saved.getId().toString(),
-                null,
-                Map.of("planId", request.planId(), "startDate", request.startDate()),
-                null,
-                null
-        );
-
         if (!"trialing".equals(saved.getStatus())) {
-            paymentService.createPaymentForSubscription(saved);
+            paymentService.createPaymentForSubscription(saved, idempotencyKey);
         }
 
         return convertToResponse(saved);
@@ -176,12 +163,18 @@ public class SubscriptionService {
 
         for (Subscription subscription : dueSubscriptions) {
             try {
-                paymentService.createPaymentForSubscription(subscription);
+                String idempotencyKey = "scheduled_payment_" + subscription.getId() + "_" + System.currentTimeMillis();
+
+                paymentService.createPaymentForSubscription(subscription, idempotencyKey);
                 log.info("Scheduled payment created for subscription {}", subscription.getId());
             } catch (Exception e) {
                 log.error("Failed to create scheduled payment for subscription {}", subscription.getId(), e);
             }
         }
+    }
+
+    public void validateTenantAndApiKey(String tenantId, String apiKey) {
+        tenantService.validateTenantAndApiKey(tenantId, apiKey);
     }
 
     private void calculateSubscriptionDates(Subscription subscription, Plan plan, LocalDate startDate) {

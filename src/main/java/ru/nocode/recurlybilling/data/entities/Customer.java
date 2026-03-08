@@ -29,9 +29,14 @@ public class Customer {
     @Column(name = "external_id", nullable = false)
     private String externalId;
 
-    private byte[] email;
-    private byte[] fullName;
-    private byte[] phone;
+    @Column(name = "email", columnDefinition = "text")
+    private String email;
+
+    @Column(name = "full_name", columnDefinition = "text")
+    private String fullName;
+
+    @Column(name = "phone", columnDefinition = "text")
+    private String phone;
 
     @Column(name = "is_student")
     private Boolean isStudent = true;
