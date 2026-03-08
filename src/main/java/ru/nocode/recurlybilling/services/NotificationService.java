@@ -1,5 +1,6 @@
 package ru.nocode.recurlybilling.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -11,8 +12,6 @@ import ru.nocode.recurlybilling.data.repositories.NotificationRepository;
 import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
 import ru.nocode.recurlybilling.data.repositories.TenantRepository;
-import ru.nocode.recurlybilling.components.notifications.senders.EmailSender;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,7 +27,6 @@ public class NotificationService {
     private final SubscriptionRepository subscriptionRepository;
     private final PlanRepository planRepository;
     private final TenantRepository tenantRepository;
-    private final EmailSender emailSender;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -157,46 +155,21 @@ public class NotificationService {
     @Async
     void sendNotificationAsync(Notification notification, Map<String, Object> templateData) {
         try {
-            templateData.putIfAbsent("tenant_name", notification.getTenantId());
-
             String renderedBody = renderTemplate(notification.getBodyTemplate(), templateData);
             String renderedSubject = renderTemplate(notification.getSubject(), templateData);
 
-            boolean sent = false;
-            String errorMessage = null;
+            log.info("📧 NOTIFICATION SAVED (email sending disabled in dev):\nTo: {}\nSubject: {}\nBody:\n{}",
+                    notification.getRecipient(), renderedSubject, renderedBody);
 
-            if ("email".equals(notification.getChannel()) &&
-                    notification.getRecipient() != null &&
-                    !notification.getRecipient().isBlank()) {
-
-                try {
-                    emailSender.send(notification.getRecipient(), renderedSubject, renderedBody);
-                    sent = true;
-                } catch (Exception e) {
-                    errorMessage = "Email send failed: " + e.getMessage();
-                    log.warn("Failed to send email to {}: {}", notification.getRecipient(), e.getMessage());
-                }
-            } else {
-                errorMessage = "Unsupported channel or empty recipient: " + notification.getChannel();
-                log.warn("Cannot send notification: {}", errorMessage);
-            }
-
-            notification.setStatus(sent ? "sent" : "failed");
+            notification.setStatus("sent");
             notification.setSentAt(LocalDateTime.now());
-            if (!sent && errorMessage != null) {
-                notification.setErrorMessage(errorMessage);
-            }
             notificationRepository.save(notification);
 
-            if (sent) {
-                log.info("Notification sent: id={}, channel={}, recipient={}",
-                        notification.getId(), notification.getChannel(), notification.getRecipient());
-            }
         } catch (Exception e) {
-            log.error("Async notification sending failed: id={}", notification.getId(), e);
+            log.error("Async notification processing failed: id={}", notification.getId(), e);
             notification.setStatus("failed");
             notification.setSentAt(LocalDateTime.now());
-            notification.setErrorMessage("Internal error: " + e.getMessage());
+            notification.setErrorMessage(e.getMessage());
             notificationRepository.save(notification);
         }
     }

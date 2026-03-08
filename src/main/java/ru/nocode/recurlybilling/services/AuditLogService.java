@@ -1,5 +1,6 @@
 package ru.nocode.recurlybilling.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -7,7 +8,6 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.data.dto.AuditLogEntry;
 import ru.nocode.recurlybilling.data.entities.AuditLog;
 import ru.nocode.recurlybilling.data.repositories.AuditLogRepository;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.List;

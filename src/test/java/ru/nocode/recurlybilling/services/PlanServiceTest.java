@@ -1,5 +1,7 @@
 package ru.nocode.recurlybilling.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -8,8 +10,6 @@ import ru.nocode.recurlybilling.data.dto.request.PlanCreateRequest;
 import ru.nocode.recurlybilling.data.dto.response.PlanResponse;
 import ru.nocode.recurlybilling.data.entities.Plan;
 import ru.nocode.recurlybilling.data.repositories.PlanRepository;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.time.LocalDate;
 import java.util.Map;
@@ -52,7 +52,10 @@ class PlanServiceTest {
         when(planRepository.existsByTenantIdAndCode("moscow_digital_school", "math-autumn-2025"))
                 .thenReturn(false);
 
-        when(planRepository.save(any(Plan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(planRepository.save(any(Plan.class))).thenAnswer(inv -> {
+            Plan input = inv.getArgument(0);
+            return input;
+        });
 
         when(objectMapper.valueToTree(any(Map.class)))
                 .thenReturn(JsonNodeFactory.instance.objectNode().put("semester", "2025-осень"));

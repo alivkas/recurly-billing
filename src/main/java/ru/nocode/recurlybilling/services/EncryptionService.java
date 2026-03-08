@@ -6,7 +6,9 @@ import org.springframework.stereotype.Service;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.util.Base64;
 
 @Service
 public class EncryptionService {
@@ -17,7 +19,7 @@ public class EncryptionService {
 
     private final SecretKey secretKey;
 
-    public EncryptionService(@Value("${encryption.key:default-secret-key-32-bytes-long}") String key) {
+    public EncryptionService(@Value("${encryption.key}") String key) {
         try {
             byte[] keyBytes = key.getBytes("UTF-8");
             if (keyBytes.length < 32) {
@@ -33,9 +35,9 @@ public class EncryptionService {
         }
     }
 
-    public byte[] encrypt(String plaintext) {
+    public String encrypt(String plaintext) {
         if (plaintext == null || plaintext.isBlank()) {
-            return new byte[0];
+            return "";
         }
         try {
             Cipher cipher = Cipher.getInstance(ALGORITHM);
@@ -44,21 +46,22 @@ public class EncryptionService {
             random.nextBytes(iv);
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH * 8, iv);
             cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
-            byte[] ciphertext = cipher.doFinal(plaintext.getBytes("UTF-8"));
+            byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
             byte[] result = new byte[iv.length + ciphertext.length];
             System.arraycopy(iv, 0, result, 0, iv.length);
             System.arraycopy(ciphertext, 0, result, iv.length, ciphertext.length);
-            return result;
+            return Base64.getEncoder().encodeToString(result);
         } catch (Exception e) {
             throw new RuntimeException("Encryption failed", e);
         }
     }
 
-    public String decrypt(byte[] encrypted) {
-        if (encrypted == null || encrypted.length == 0) {
+    public String decrypt(String encryptedBase64) {
+        if (encryptedBase64 == null || encryptedBase64.isEmpty()) {
             return null;
         }
         try {
+            byte[] encrypted = Base64.getDecoder().decode(encryptedBase64);
             byte[] iv = new byte[GCM_IV_LENGTH];
             byte[] ciphertext = new byte[encrypted.length - iv.length];
             System.arraycopy(encrypted, 0, iv, 0, iv.length);
@@ -67,7 +70,7 @@ public class EncryptionService {
             GCMParameterSpec spec = new GCMParameterSpec(GCM_TAG_LENGTH * 8, iv);
             cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
             byte[] plaintext = cipher.doFinal(ciphertext);
-            return new String(plaintext, "UTF-8");
+            return new String(plaintext, StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new RuntimeException("Decryption failed", e);
         }

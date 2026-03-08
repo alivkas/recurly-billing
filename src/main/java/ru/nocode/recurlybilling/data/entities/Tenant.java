@@ -22,10 +22,10 @@ public class Tenant {
     @Column(nullable = false)
     private String name;
 
-    @Column(name = "contact_email")
+    @Column(name = "contact_email", columnDefinition = "text")
     private byte[] contactEmail;
 
-    @Column(name = "api_key_hash", nullable = false)
+    @Column(name = "api_key_hash", columnDefinition = "text")
     private String apiKeyHash;
 
     @Column(name = "is_active")
@@ -37,7 +37,7 @@ public class Tenant {
     @Column(name = "yookassa_shop_id")
     private String yooKassaShopId;
 
-    @Column(name = "yookassa_secret_key", columnDefinition = "bytea")
+    @Column(name = "yookassa_secret_key", columnDefinition = "text")
     private byte[] yooKassaSecretKey;
 
     @CreationTimestamp

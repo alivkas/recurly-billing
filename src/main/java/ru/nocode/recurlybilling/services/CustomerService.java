@@ -9,6 +9,7 @@ import ru.nocode.recurlybilling.data.entities.Customer;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,13 +34,13 @@ public class CustomerService {
         customer.setIsStudent(request.isStudent() != null ? request.isStudent() : true);
 
         if (request.email() != null && !request.email().isBlank()) {
-            customer.setEmail(encryptionService.encrypt(request.email()));
+            customer.setEmail(encryptionService.encrypt(request.email()).getBytes());
         }
         if (request.fullName() != null && !request.fullName().isBlank()) {
-            customer.setFullName(encryptionService.encrypt(request.fullName()));
+            customer.setFullName(encryptionService.encrypt(request.fullName()).getBytes());
         }
         if (request.phone() != null && !request.phone().isBlank()) {
-            customer.setPhone(encryptionService.encrypt(request.phone()));
+            customer.setPhone(encryptionService.encrypt(request.phone()).getBytes());
         }
 
         customer.setIsActive(true);
@@ -62,8 +63,8 @@ public class CustomerService {
         return new CustomerResponse(
                 saved.getId().toString(),
                 saved.getExternalId(),
-                saved.getEmail() != null && saved.getEmail().length > 0 ? encryptionService.decrypt(saved.getEmail()) : null,
-                saved.getFullName() != null && saved.getFullName().length > 0 ? encryptionService.decrypt(saved.getFullName()) : null,
+                saved.getEmail() != null && saved.getEmail().length > 0 ? encryptionService.decrypt(Arrays.toString(saved.getEmail())) : null,
+                saved.getFullName() != null && saved.getFullName().length > 0 ? encryptionService.decrypt(Arrays.toString(saved.getFullName())) : null,
                 saved.getIsStudent(),
                 saved.getCreatedAt()
         );
@@ -77,8 +78,8 @@ public class CustomerService {
         return new CustomerResponse(
                 customer.getId().toString(),
                 customer.getExternalId(),
-                customer.getEmail() != null && customer.getEmail().length > 0 ? encryptionService.decrypt(customer.getEmail()) : null,
-                customer.getFullName() != null && customer.getFullName().length > 0 ? encryptionService.decrypt(customer.getFullName()) : null,
+                customer.getEmail() != null && customer.getEmail().length > 0 ? encryptionService.decrypt(Arrays.toString(customer.getEmail())) : null,
+                customer.getFullName() != null && customer.getFullName().length > 0 ? encryptionService.decrypt(Arrays.toString(customer.getFullName())) : null,
                 customer.getIsStudent(),
                 customer.getCreatedAt()
         );
