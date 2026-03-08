@@ -36,6 +36,9 @@ public class Subscription {
     @Column(nullable = false)
     private String status;
 
+    @Column(name = "payment_method")
+    private String paymentMethod;
+
     @Column(name = "current_period_start", nullable = false)
     private LocalDate currentPeriodStart;
 

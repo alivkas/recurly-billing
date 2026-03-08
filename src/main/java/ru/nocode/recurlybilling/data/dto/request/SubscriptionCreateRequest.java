@@ -11,5 +11,6 @@ public record SubscriptionCreateRequest(
         @NotBlank
         String planId,
         @NotNull
-        LocalDate startDate
+        LocalDate startDate,
+        String paymentMethod
 ) {}
