@@ -1,22 +1,16 @@
 package ru.nocode.recurlybilling.data.dto.response;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.Map;
 
-import java.time.LocalDateTime;
-
-@AllArgsConstructor
-@Getter
-@Setter
-public class AnalyticsResponse {
-    private String tenantId;
-    private long mrrCents;
-    private double mrrRub;
-    private long semesterRevenueCents;
-    private double semesterRevenueRub;
-    private int activeRecurringSubscriptions;
-    private int activeSemesterSubscriptions;
-    private int totalActiveSubscriptions;
-    private LocalDateTime calculatedAt;
-}
+public record AnalyticsResponse(
+        BigDecimal mrr,
+        Long activeSubscriptions,
+        Long totalCustomers,
+        BigDecimal churnRate,
+        Map<String, Long> subscriptionsByPlan,
+        Map<LocalDate, BigDecimal> revenueByMonth,
+        BigDecimal mrrGrowthRate,
+        Long newSubscriptionsLast30Days   // Новые подписки за 30 дней
+) {}

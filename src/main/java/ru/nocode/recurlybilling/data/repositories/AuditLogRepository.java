@@ -13,14 +13,9 @@ import java.util.UUID;
 public interface AuditLogRepository extends JpaRepository<AuditLog, UUID> {
 
     List<AuditLog> findByTenantId(String tenantId);
-
     List<AuditLog> findByTenantIdAndUserId(String tenantId, String userId);
-
-    List<AuditLog> findByTenantIdAndAction(String tenantId, String action);
-
     List<AuditLog> findByTenantIdAndResourceTypeAndResourceId(
             String tenantId, String resourceType, String resourceId);
-
     @Query("SELECT COUNT(a) FROM AuditLog a WHERE a.tenantId = :tenantId AND a.createdAt >= :since")
     long countByTenantIdSince(String tenantId, LocalDateTime since);
 }

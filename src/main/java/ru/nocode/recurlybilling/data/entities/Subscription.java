@@ -61,6 +61,12 @@ public class Subscription {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    @Column(name = "interval")
+    private String interval;
+
+    @Column(name = "amount_cents")
+    private Long amountCents;
+
     @CreationTimestamp
     @Column(name = "created_at")
     private LocalDateTime createdAt;

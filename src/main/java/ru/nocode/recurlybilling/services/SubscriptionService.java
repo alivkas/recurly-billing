@@ -66,6 +66,8 @@ public class SubscriptionService {
             subscription.setStatus("trialing");
         }
 
+        subscription.setInterval(plan.getInterval());
+        subscription.setAmountCents(plan.getPriceCents());
         subscription.setIsActive(true);
         subscription.setCreatedAt(LocalDateTime.now());
 

@@ -11,6 +11,7 @@ import java.util.UUID;
 @Repository
 public interface CustomerRepository extends JpaRepository<Customer, UUID> {
     List<Customer> findByTenantId(String tenantId);
+    Long countByTenantId(String tenantId);
     Optional<Customer> findByTenantIdAndExternalId(String tenantId, String externalId);
     boolean existsByTenantIdAndExternalId(String tenantId, String externalId);
 }
