@@ -42,7 +42,10 @@ public class SubscriptionController {
         try {
             subscriptionService.validateTenantAndApiKey(tenantId, apiKey);
             SubscriptionResponse response = subscriptionService.createSubscription(tenantId, request, idempotencyKey);
-            PaymentResponse paymentResponse = paymentService.getLastPaymentForSubscription(response.id());
+            PaymentResponse paymentResponse = null;
+            if (!"trialing".equals(response.status())) {
+                paymentResponse = paymentService.getLastPaymentForSubscription(response.id());
+            }
             log.info("Successfully created subscription: {} for tenant: {}", response.id(), tenantId);
 
             if (paymentResponse != null && paymentResponse.confirmationUrl() != null) {

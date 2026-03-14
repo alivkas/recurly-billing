@@ -13,7 +13,10 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "invoices")
+@Table(name = "invoices", indexes = {
+        @Index(name = "idx_invoice_retry", columnList = "next_retry_at"),
+        @Index(name = "idx_invoice_status", columnList = "status")
+})
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

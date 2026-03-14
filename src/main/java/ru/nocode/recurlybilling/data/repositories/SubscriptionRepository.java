@@ -41,4 +41,8 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
     @Query("SELECT s FROM Subscription s WHERE s.tenantId = :tenantId AND s.status = 'active' AND s.currentPeriodStart <= :date AND s.currentPeriodEnd >= :date")
     List<Subscription> findActiveAtDate(@Param("tenantId") String tenantId, @Param("date") LocalDate date);
     Long countByTenantIdAndCreatedAtAfter(String tenantId, LocalDateTime dateTime);
+    List<Subscription> findByTenantIdAndStatusAndTrialEndBefore(
+            String tenantId, String status, LocalDate trialEndBefore
+    );
+    boolean existsByTenantIdAndCustomerId(String tenantId, String studentId);
 }

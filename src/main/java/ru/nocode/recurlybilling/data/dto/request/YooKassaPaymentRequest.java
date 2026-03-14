@@ -23,6 +23,7 @@ public class YooKassaPaymentRequest {
     @JsonProperty("capture")
     private Boolean capture = true;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("payment_method_id")
     private String paymentMethodId;
 

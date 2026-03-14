@@ -87,7 +87,11 @@ public class PaymentService {
             invoiceRepository.save(savedInvoice);
 
             if ("paid".equals(mappedStatus)) {
-                extendSubscriptionPeriod(savedInvoice);
+                if (subscription.getNextBillingDate() != null) {
+                    extendSubscriptionPeriod(savedInvoice);
+                } else {
+                    log.info("First payment for subscription {}, no extension needed", subscription.getId());
+                }
             }
 
             return new PaymentResponse(
@@ -252,6 +256,12 @@ public class PaymentService {
 
         subscription.setCurrentPeriodStart(newPeriodStart);
         subscription.setCurrentPeriodEnd(newPeriodEnd);
+        subscription.setFailedPaymentAttempts(0);
+        subscription.setPastDueSince(null);
+
+        if (subscription.equals("past_due")) {
+            subscription.setStatus("active");
+        }
 
         if (plan.getEndDate() == null || newPeriodEnd.isBefore(plan.getEndDate())) {
             subscription.setNextBillingDate(newPeriodEnd.plusDays(1));

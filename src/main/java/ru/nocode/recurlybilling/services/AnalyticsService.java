@@ -79,8 +79,9 @@ public class AnalyticsService {
                         return BigDecimal.valueOf(amountCents / 6.0 / 100.0);
                     } else if ("year".equals(interval)) {
                         return BigDecimal.valueOf(amountCents / 12.0 / 100.0);
+                    } else if ("month".equals(interval)) {
+                        return BigDecimal.valueOf(amountCents / 100.0);
                     } else {
-                        // month, custom → считаем как месячный
                         return BigDecimal.valueOf(amountCents / 100.0);
                     }
                 })

@@ -17,4 +17,10 @@ public class TestController {
         subscriptionService.processBillingForTenant("moscow_digital");
         return ResponseEntity.ok("Billing triggered");
     }
+
+    @GetMapping("/test-trial-end")
+    public ResponseEntity<String> testTrialEnd() {
+        subscriptionService.processScheduledBilling();
+        return ResponseEntity.ok("Trial end processing triggered");
+    }
 }

@@ -37,6 +37,7 @@ public class SubscriptionService {
     private final TenantRepository tenantRepository;
     private final ObjectMapper objectMapper;
     private final TenantService tenantService;
+    private final AccessService accessService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) throws JsonProcessingException {
@@ -78,8 +79,12 @@ public class SubscriptionService {
 
         Subscription saved = subscriptionRepository.save(subscription);
 
-        if (!"trialing".equals(saved.getStatus())) {
-            paymentService.createPaymentForSubscription(saved, idempotencyKey);
+        try {
+            if (!"trialing".equals(saved.getStatus())) {
+                paymentService.createPaymentForSubscription(saved, idempotencyKey);
+            }
+        } catch (Exception e) {
+            log.error("Failed to create initial payment, but subscription saved", e);
         }
 
         return convertToResponse(saved);
@@ -128,19 +133,25 @@ public class SubscriptionService {
         Subscription subscription = subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new IllegalArgumentException("Subscription not found"));
 
+        int failedAttempts = subscription.getFailedPaymentAttempts() + 1;
+        subscription.setFailedPaymentAttempts(failedAttempts);
         subscription.setStatus("past_due");
+        subscription.setPastDueSince(LocalDateTime.now());
         subscriptionRepository.save(subscription);
 
-        try {
-            List<Invoice> failedInvoices = invoiceRepository.findBySubscriptionIdAndStatusOrderByCreatedAtDesc(
-                    subscriptionId, "failed"
-            );
-            if (!failedInvoices.isEmpty()) {
-                log.warn("Retry logic not implemented yet for subscription {}", subscriptionId);
+        if (failedAttempts >= 3) {
+            try {
+                Customer customer = customerRepository.findById(subscription.getCustomerId())
+                        .orElseThrow();
+                Plan plan = planRepository.findById(subscription.getPlanId())
+                        .orElseThrow();
+                accessService.revokeAccessOnPaymentFailure(customer.getExternalId(), plan.getCode());
+            } catch (Exception e) {
+                log.error("Failed to revoke access for subscription {}", subscriptionId, e);
             }
-        } catch (Exception e) {
-            log.warn("Failed to handle payment failure for subscription {}: {}", subscriptionId, e.getMessage());
         }
+
+        log.warn("Payment failed for subscription {}. Attempts: {}", subscriptionId, failedAttempts);
     }
 
     @Scheduled(cron = "0 0 2 * * *", zone = "Europe/Moscow")
@@ -150,6 +161,7 @@ public class SubscriptionService {
 
         for (String tenantId : tenantIds) {
             try {
+                processExpiredTrials(tenantId);
                 processBillingForTenant(tenantId);
             } catch (Exception e) {
                 log.error("Error processing billing for tenant {}", tenantId, e);
@@ -239,6 +251,43 @@ public class SubscriptionService {
                 subscription.setNextBillingDate(firstPeriodEnd.plusDays(1));
             } else {
                 subscription.setNextBillingDate(null);
+            }
+        }
+    }
+
+    private void processExpiredTrials(String tenantId) {
+        LocalDate today = LocalDate.now();
+        List<Subscription> expiredTrials = subscriptionRepository
+                .findByTenantIdAndStatusAndTrialEndBefore(tenantId, "trialing", today.plusDays(1));
+
+        for (Subscription subscription : expiredTrials) {
+            try {
+                log.info("Processing expired trial for subscription: {}", subscription.getId());
+
+                Plan plan = planRepository.findById(subscription.getPlanId())
+                        .orElseThrow(() -> new IllegalStateException("Plan not found"));
+
+                LocalDate periodEnd = calculateNextPeriodEnd(subscription.getCurrentPeriodStart(), plan);
+                if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
+                    periodEnd = plan.getEndDate();
+                }
+                subscription.setCurrentPeriodEnd(periodEnd);
+                if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
+                    subscription.setNextBillingDate(periodEnd.plusDays(1));
+                } else {
+                    subscription.setNextBillingDate(null);
+                }
+
+                subscription.setStatus("active");
+                subscriptionRepository.save(subscription);
+
+                String idempotencyKey = "trial_end_" + subscription.getId() + "_" + System.currentTimeMillis();
+                paymentService.createPaymentForSubscription(subscription, idempotencyKey);
+
+                log.info("Trial ended and first payment created for subscription: {}", subscription.getId());
+
+            } catch (Exception e) {
+                log.error("Failed to process expired trial for subscription: {}", subscription.getId(), e);
             }
         }
     }

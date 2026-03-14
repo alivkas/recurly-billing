@@ -1,6 +1,7 @@
 package ru.nocode.recurlybilling.services;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +14,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AccessService {
@@ -32,6 +34,9 @@ public class AccessService {
             if (periodEnd.isAfter(existing.getAccessExpiresAt())) {
                 existing.setAccessExpiresAt(periodEnd);
                 accessRepository.save(existing);
+                log.info("Extended access for student {} until {}", customerId, periodEnd);
+            } else {
+                log.info("Access already valid until {}, no extension needed", existing.getAccessExpiresAt());
             }
             return;
         }
@@ -61,10 +66,15 @@ public class AccessService {
         List<StudentAccess> expired = accessRepository.findByAccessExpiresAtBeforeAndStatus(
                 today, StudentAccess.AccessStatus.ACTIVE
         );
+
+        int count = 0;
         for (StudentAccess access : expired) {
             access.setStatus(StudentAccess.AccessStatus.EXPIRED);
+            count++;
         }
+
         accessRepository.saveAll(expired);
+        log.info("Deactivated {} expired accesses", count);
     }
 
     public boolean hasActiveAccess(String studentId, String planCode) {
@@ -85,6 +95,19 @@ public class AccessService {
     }
 
     public boolean isStudentBelongsToTenant(String studentId, String tenantId) {
-        return accessRepository.existsByStudentIdAndTenantId(studentId, tenantId);
+        boolean belongsToTenant = subscriptionRepository
+                .existsByTenantIdAndCustomerId(tenantId, studentId);
+        return belongsToTenant;
+    }
+
+    public void revokeAccessOnPaymentFailure(String customerId, String planCode) {
+        List<StudentAccess> accesses = accessRepository.findByStudentIdAndPlanCodeAndStatus(
+                customerId, planCode, StudentAccess.AccessStatus.ACTIVE
+        );
+        for (StudentAccess access : accesses) {
+            access.setStatus(StudentAccess.AccessStatus.EXPIRED);
+        }
+        accessRepository.saveAll(accesses);
+        log.info("Revoked access for student {} due to payment failure", customerId);
     }
 }

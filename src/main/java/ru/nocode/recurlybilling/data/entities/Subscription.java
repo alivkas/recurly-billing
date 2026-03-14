@@ -36,10 +36,15 @@ public class Subscription {
     @Column(nullable = false)
     private String status;
 
+    private int failedPaymentAttempts = 0;
+
+    private LocalDateTime pastDueSince;
+
     @Column(name = "payment_method")
     private String paymentMethod;
 
-    @Column(name = "payment_method_id")
+    @Column(name = "payment_method_id", nullable = true)
+    @Comment("Saved payment method ID from YooKassa. Null during trial period.")
     private String paymentMethodId;
 
     @Column(name = "current_period_start", nullable = false)

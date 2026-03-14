@@ -2,6 +2,7 @@ package ru.nocode.recurlybilling.data.entities;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.Comment;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.annotations.UuidGenerator;
@@ -30,6 +31,7 @@ public class Customer {
     private String externalId;
 
     @Column(name = "email", columnDefinition = "text")
+    @Comment("Encrypted using AES/GCM")
     private String email;
 
     @Column(name = "full_name", columnDefinition = "text")
