@@ -19,6 +19,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,6 +40,7 @@ public class SubscriptionService {
     private final TenantService tenantService;
     private final AccessService accessService;
     private final NotificationService notificationService;
+    private final AuditLogService auditLogService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) throws JsonProcessingException {
@@ -80,6 +82,14 @@ public class SubscriptionService {
 
         Subscription saved = subscriptionRepository.save(subscription);
 
+        Map<String, Object> newValues = new HashMap<>();
+        newValues.put("customer_id", request.customerId());
+        newValues.put("plan_id", request.planId());
+        newValues.put("status", saved.getStatus());
+        newValues.put("trial_days", plan.getTrialDays());
+        auditLogService.logCreate(tenantId, request.customerId(), "subscription", saved.getId().toString(),
+                newValues, "127.0.0.1", "API");
+
         try {
             if (!"trialing".equals(saved.getStatus())) {
                 paymentService.createPaymentForSubscription(saved, idempotencyKey);
@@ -110,6 +120,17 @@ public class SubscriptionService {
         }
 
         Subscription saved = subscriptionRepository.save(subscription);
+
+        Map<String, Object> oldValues = new HashMap<>();
+        oldValues.put("status", "active");
+        Map<String, Object> newValues = new HashMap<>();
+        newValues.put("status", "cancelled");
+        newValues.put("cancel_at", subscription.getCancelAt());
+        newValues.put("cancel_immediately", request.cancelImmediately());
+
+        auditLogService.logUpdate(tenantId, "system", "subscription", subscriptionId,
+                oldValues, newValues, "127.0.0.1", "API");
+
         return convertToResponse(saved);
     }
 

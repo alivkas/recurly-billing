@@ -40,6 +40,7 @@ public class PaymentService {
     private final Environment environment;
     private final AccessService accessService;
     private final NotificationService notificationService;
+    private final AuditLogService auditLogService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) throws JsonProcessingException {
@@ -171,6 +172,16 @@ public class PaymentService {
                     plan.getCode(),
                     subscription.getCurrentPeriodEnd()
             );
+
+            auditLogService.logPaymentSuccess(
+                    tenantId,
+                    subscription.getCustomerId().toString(),
+                    paymentId,
+                    invoice.getAmountCents(),
+                    "127.0.0.1",
+                    "YooKassa Webhook"
+            );
+
             notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
         }
 
@@ -232,6 +243,18 @@ public class PaymentService {
         } else {
             subscription.setStatus("past_due");
             subscriptionRepository.save(subscription);
+
+            auditLogService.logPaymentFailed(
+                    subscription.getTenantId(),
+                    subscription.getCustomerId().toString(),
+                    invoice.getPaymentId(),
+                    invoice.getAmountCents(),
+                    invoice.getAttemptCount(),
+                    "127.0.0.1",
+                    "Scheduled Task"
+            );
+
+
             log.warn("Max retry attempts reached for subscription {}. Marked as past_due.", subscription.getId());
         }
     }

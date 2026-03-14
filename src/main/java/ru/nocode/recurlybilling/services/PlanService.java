@@ -12,10 +12,7 @@ import ru.nocode.recurlybilling.data.entities.Plan;
 import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -25,6 +22,7 @@ public class PlanService {
 
     private final PlanRepository planRepository;
     private final ObjectMapper objectMapper;
+    private final AuditLogService auditLogService;
 
     @Transactional
     public PlanResponse createPlan(String tenantId, PlanCreateRequest request) {
@@ -56,6 +54,15 @@ public class PlanService {
         try {
             Plan savedPlan = planRepository.save(planToSave);
             log.info("Plan saved with ID: {}", savedPlan.getId());
+
+            Map<String, Object> newValues = new HashMap<>();
+            newValues.put("code", request.code());
+            newValues.put("name", request.name());
+            newValues.put("price_cents", request.priceCents());
+            newValues.put("interval", request.interval());
+            auditLogService.logCreate(tenantId, "system", "plan", planToSave.getId().toString(),
+                    newValues, "127.0.0.1", "API");
+
             return convertToResponse(savedPlan);
         } catch (DataIntegrityViolationException e) {
             log.warn("Plan with code '{}' already exists for tenant '{}'", request.code(), tenantId);

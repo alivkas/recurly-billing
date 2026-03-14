@@ -27,7 +27,6 @@ public class WebhookEventService {
                                                    String paymentId, String signature,
                                                    String rawRequestBody, Object parsedBody) {
         WebhookEvent event = new WebhookEvent();
-        event.setId(UUID.randomUUID());
         event.setTenantId(tenantId);
         event.setEventType(eventType);
         event.setPaymentId(paymentId);

@@ -26,9 +26,9 @@ public class TestController {
         return ResponseEntity.ok("Trial end processing triggered");
     }
 
-//    @GetMapping("/test-notify")
-//    public ResponseEntity<String> testNotify() {
-//        notificationService.sendPaymentReminderNotifications();
-//        return ResponseEntity.ok("Notificated");
-//    }
+    @GetMapping("/test-notify")
+    public ResponseEntity<String> testNotify() {
+        notificationService.sendScheduledUpcomingPaymentNotifications();
+        return ResponseEntity.ok("Notificated");
+    }
 }
