@@ -1,10 +1,12 @@
 package ru.nocode.recurlybilling.services;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
@@ -37,8 +39,8 @@ public class PaymentService {
     private final ObjectMapper objectMapper;
     private final Environment environment;
 
-    @Transactional
-    public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) throws JsonProcessingException {
         Plan plan = planRepository.findById(subscription.getPlanId())
                 .orElseThrow(() -> new IllegalStateException("Plan not found for subscription"));
 
@@ -62,8 +64,11 @@ public class PaymentService {
             if (response.getPaymentMethod() != null &&
                     response.getPaymentMethod().getId() != null &&
                     subscription.getPaymentMethodId() == null) {
+
                 subscription.setPaymentMethodId(response.getPaymentMethod().getId());
                 subscriptionRepository.save(subscription);
+                log.info("Saved payment_method_id: {} for subscription: {}",
+                        response.getPaymentMethod().getId(), subscription.getId());
             }
 
             String confirmationUrl = null;
@@ -72,16 +77,21 @@ public class PaymentService {
                 confirmationUrl = response.getConfirmation().getConfirmationUrl();
             }
 
+            String mappedStatus = mapYooKassaStatus(response.getStatus());
             savedInvoice.setPaymentId(response.getId());
-            savedInvoice.setStatus(mapYooKassaStatus(response.getStatus()));
+            savedInvoice.setStatus(mappedStatus);
             savedInvoice.setConfirmationUrl(confirmationUrl);
             savedInvoice.setUpdatedAt(LocalDateTime.now());
 
             invoiceRepository.save(savedInvoice);
 
+            if ("paid".equals(mappedStatus)) {
+                extendSubscriptionPeriod(savedInvoice);
+            }
+
             return new PaymentResponse(
                     response.getId(),
-                    savedInvoice.getStatus(),
+                    mappedStatus,
                     confirmationUrl,
                     savedInvoice.getAmountCents(),
                     "RUB",
@@ -101,8 +111,17 @@ public class PaymentService {
 
     @Transactional
     public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> webhook, String tenantId) {
-        Invoice invoice = invoiceRepository.findByPaymentId(paymentId)
-                .orElseThrow(() -> new IllegalArgumentException("Invoice not found: " + paymentId));
+        Optional<Invoice> invoiceOpt = invoiceRepository.findByPaymentId(paymentId);
+
+        if (invoiceOpt.isEmpty()) {
+            log.warn("Invoice not found for paymentId: {}. Skipping webhook processing.", paymentId);
+            return;
+        }
+
+        Invoice invoice = invoiceOpt.get();
+        if (!invoice.getTenantId().equals(tenantId)) {
+            throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
+        }
 
         if (!invoice.getTenantId().equals(tenantId)) {
             throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
@@ -227,20 +246,22 @@ public class PaymentService {
 
         BigDecimal amountRub = new BigDecimal(invoice.getAmountCents())
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-        request.setAmount(new YooKassaPaymentRequest.Amount((long) amountRub.doubleValue(), "RUB"));
+        request.setAmount(new YooKassaPaymentRequest.Amount(amountRub.longValue(), "RUB"));
+        request.setDescription("Оплата подписки #" + invoice.getId());
 
+        String description;
         if (subscription.getPaymentMethodId() != null) {
             request.setPaymentMethodId(subscription.getPaymentMethodId());
+            description = "Автоматическое продление подписки #" + subscription.getId();
         } else {
             request.setPaymentMethodData(new YooKassaPaymentRequest.PaymentMethodData("bank_card"));
             request.setSavePaymentMethod(true);
 
             String returnUrl = environment.getProperty("payment.return-url",
-                    "https://default.example.com/payment/success?tenant=" + subscription.getTenantId());
-            request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl));
+                    "https://your-ngrok-url.ngrok.io/success");
+            description = "Оплата подписки #" + invoice.getId();
+            request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl.trim()));
         }
-
-        request.setDescription("Оплата подписки #" + invoice.getId());
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("subscriptionId", subscription.getId().toString());
@@ -248,6 +269,9 @@ public class PaymentService {
         metadata.put("invoiceId", invoice.getId().toString());
         metadata.put("planCode", plan.getCode());
         request.setMetadata(metadata);
+
+        request.setCapture(true);
+        request.setDescription(description);
 
         return request;
     }

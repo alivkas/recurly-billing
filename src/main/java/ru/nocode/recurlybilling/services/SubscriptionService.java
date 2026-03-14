@@ -1,5 +1,6 @@
 package ru.nocode.recurlybilling.services;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -38,7 +39,7 @@ public class SubscriptionService {
     private final TenantService tenantService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
-    public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) {
+    public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) throws JsonProcessingException {
         Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, request.customerId())
                 .orElseThrow(() -> new IllegalArgumentException("Customer with externalId '" + request.customerId() + "' not found"));
 
@@ -165,7 +166,7 @@ public class SubscriptionService {
 
         for (Subscription subscription : dueSubscriptions) {
             try {
-                String idempotencyKey = "scheduled_payment_" + subscription.getId() + "_" + System.currentTimeMillis();
+                String idempotencyKey = "sched_" + UUID.randomUUID().toString().replace("-", "");
 
                 paymentService.createPaymentForSubscription(subscription, idempotencyKey);
                 log.info("Scheduled payment created for subscription {}", subscription.getId());

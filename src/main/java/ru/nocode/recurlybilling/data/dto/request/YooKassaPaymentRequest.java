@@ -1,5 +1,6 @@
 package ru.nocode.recurlybilling.data.dto.request;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -10,6 +11,7 @@ import java.util.Map;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class YooKassaPaymentRequest {
 
     private Amount amount;
@@ -21,9 +23,14 @@ public class YooKassaPaymentRequest {
     @JsonProperty("capture")
     private Boolean capture = true;
 
-    private PaymentMethodData paymentMethodData;
-    private Boolean savePaymentMethod;
+    @JsonProperty("payment_method_id")
     private String paymentMethodId;
+
+    @JsonProperty("payment_method_data")
+    private PaymentMethodData paymentMethodData;
+
+    @JsonProperty("save_payment_method")
+    private Boolean savePaymentMethod;
 
     @Data
     @NoArgsConstructor
