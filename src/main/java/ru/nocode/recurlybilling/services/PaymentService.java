@@ -38,6 +38,7 @@ public class PaymentService {
     private final YooKassaClient yooKassaClient;
     private final ObjectMapper objectMapper;
     private final Environment environment;
+    private final AccessService accessService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) throws JsonProcessingException {
@@ -152,6 +153,18 @@ public class PaymentService {
 
         if ("paid".equals(mappedStatus) && !"paid".equals(oldStatus)) {
             extendSubscriptionPeriod(invoice);
+
+            Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
+                    .orElseThrow();
+            Plan plan = planRepository.findById(subscription.getPlanId())
+                    .orElseThrow();
+
+            accessService.grantAccess(
+                    subscription.getTenantId(),
+                    String.valueOf(subscription.getCustomerId()),
+                    plan.getCode(),
+                    subscription.getCurrentPeriodEnd()
+            );
         }
 
         invoiceRepository.save(invoice);
@@ -203,20 +216,29 @@ public class PaymentService {
         Plan plan = planRepository.findById(subscription.getPlanId())
                 .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
-        if (subscription.getNextBillingDate() != null) {
-            LocalDate newPeriodStart = subscription.getCurrentPeriodEnd().plusDays(1);
-            LocalDate newPeriodEnd = calculateNextPeriodEnd(newPeriodStart, plan);
+        LocalDate newPeriodStart = subscription.getCurrentPeriodEnd().plusDays(1);
+        LocalDate newPeriodEnd = calculateNextPeriodEnd(newPeriodStart, plan);
 
-            subscription.setCurrentPeriodStart(newPeriodStart);
-            subscription.setCurrentPeriodEnd(newPeriodEnd);
-            subscription.setNextBillingDate(newPeriodEnd.plusDays(1));
-            subscription.setUpdatedAt(LocalDateTime.now());
-
-            subscriptionRepository.save(subscription);
-            log.info("Subscription extended: id={}, newPeriodEnd={}", subscription.getId(), newPeriodEnd);
-        } else {
-            log.info("Subscription is one-time (semester/course), no extension needed: id={}", subscription.getId());
+        if (plan.getEndDate() != null && newPeriodEnd.isAfter(plan.getEndDate())) {
+            newPeriodEnd = plan.getEndDate();
         }
+
+        if (plan.getEndDate() != null && newPeriodStart.isAfter(plan.getEndDate())) {
+            subscription.setNextBillingDate(null);
+            subscriptionRepository.save(subscription);
+            return;
+        }
+
+        subscription.setCurrentPeriodStart(newPeriodStart);
+        subscription.setCurrentPeriodEnd(newPeriodEnd);
+
+        if (plan.getEndDate() == null || newPeriodEnd.isBefore(plan.getEndDate())) {
+            subscription.setNextBillingDate(newPeriodEnd.plusDays(1));
+        } else {
+            subscription.setNextBillingDate(null);
+        }
+
+        subscriptionRepository.save(subscription);
     }
 
     private void validatePaymentMethod(String paymentMethod) {

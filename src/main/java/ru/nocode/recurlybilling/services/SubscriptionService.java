@@ -180,17 +180,26 @@ public class SubscriptionService {
         tenantService.validateTenantAndApiKey(tenantId, apiKey);
     }
 
-    private void calculateSubscriptionDates(Subscription subscription, Plan plan, LocalDate startDate) {
-        LocalDate start = startDate != null ? startDate : LocalDate.now();
-        subscription.setCurrentPeriodStart(start);
-
-        if (plan.getEndDate() != null) {
-            subscription.setCurrentPeriodEnd(plan.getEndDate());
+    private void calculateSubscriptionDates(Subscription subscription, Plan plan, LocalDate start) {
+        if ("semester".equals(plan.getInterval()) || "custom".equals(plan.getInterval())) {
+            LocalDate end = plan.getEndDate() != null ? plan.getEndDate() : start.plusMonths(1);
+            subscription.setCurrentPeriodEnd(end);
+            subscription.setNextBillingDate(null);
         } else {
-            subscription.setCurrentPeriodEnd(calculateNextPeriodEnd(start, plan));
-        }
+            LocalDate firstPeriodEnd = calculateNextPeriodEnd(start, plan);
 
-        subscription.setNextBillingDate(subscription.getCurrentPeriodEnd().plusDays(1));
+            if (plan.getEndDate() != null && firstPeriodEnd.isAfter(plan.getEndDate())) {
+                firstPeriodEnd = plan.getEndDate();
+            }
+
+            subscription.setCurrentPeriodEnd(firstPeriodEnd);
+
+            if (plan.getEndDate() == null || firstPeriodEnd.isBefore(plan.getEndDate())) {
+                subscription.setNextBillingDate(firstPeriodEnd.plusDays(1));
+            } else {
+                subscription.setNextBillingDate(null);
+            }
+        }
     }
 
     private LocalDate calculateNextPeriodEnd(LocalDate start, Plan plan) {
