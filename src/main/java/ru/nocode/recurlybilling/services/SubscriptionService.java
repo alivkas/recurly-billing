@@ -179,6 +179,44 @@ public class SubscriptionService {
         }
     }
 
+    @Scheduled(cron = "0 0 3 * * *", zone = "Europe/Moscow")
+    @Transactional
+    public void processFailedPayments() {
+        List<String> tenantIds = tenantRepository.findAllActiveTenantIds();
+
+        for (String tenantId : tenantIds) {
+            try {
+                processFailedPaymentsForTenant(tenantId);
+            } catch (Exception e) {
+                log.error("Error processing failed payments for tenant {}", tenantId, e);
+            }
+        }
+    }
+
+    private void processFailedPaymentsForTenant(String tenantId) {
+        LocalDateTime now = LocalDateTime.now();
+        List<Invoice> retryableInvoices = invoiceRepository
+                .findByTenantIdAndStatusAndNextRetryAtBefore(tenantId, "failed", now);
+
+        for (Invoice invoice : retryableInvoices) {
+            try {
+                Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
+                        .orElseThrow(() -> new IllegalStateException("Subscription not found"));
+
+                if (!"active".equals(subscription.getStatus())) {
+                    log.info("Skipping retry for non-active subscription: {}", subscription.getId());
+                    continue;
+                }
+
+                String idempotencyKey = "retry_" + invoice.getId() + "_" + System.currentTimeMillis();
+                paymentService.createPaymentForSubscription(subscription, idempotencyKey);
+                log.info("Retry payment created for invoice: {}", invoice.getId());
+            } catch (Exception e) {
+                log.error("Failed to retry payment for invoice: {}", invoice.getId(), e);
+            }
+        }
+    }
+
     public void validateTenantAndApiKey(String tenantId, String apiKey) {
         tenantService.validateTenantAndApiKey(tenantId, apiKey);
     }

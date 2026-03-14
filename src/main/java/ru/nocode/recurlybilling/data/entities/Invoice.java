@@ -38,6 +38,9 @@ public class Invoice {
     @Column(nullable = false)
     private String status;
 
+    @Column(name = "next_retry_at")
+    private LocalDateTime nextRetryAt;
+
     @Column(name = "payment_id")
     private String paymentId;
 

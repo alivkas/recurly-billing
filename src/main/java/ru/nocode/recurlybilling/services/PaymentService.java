@@ -105,6 +105,7 @@ public class PaymentService {
         } catch (RestClientException e) {
             savedInvoice.setStatus("failed");
             savedInvoice.setUpdatedAt(LocalDateTime.now());
+            handleFailedPayment(savedInvoice, subscription);
             invoiceRepository.save(savedInvoice);
             throw new RuntimeException("YooKassa unavailable", e);
         }
@@ -207,6 +208,26 @@ public class PaymentService {
                 "RUB",
                 latest.getCreatedAt()
         );
+    }
+
+    private void handleFailedPayment(Invoice invoice, Subscription subscription) {
+        int maxAttempts = 3;
+        int currentAttempt = invoice.getAttemptCount() + 1;
+        invoice.setAttemptCount(currentAttempt);
+
+        if (currentAttempt < maxAttempts) {
+            LocalDateTime nextRetry = switch (currentAttempt) {
+                case 1 -> LocalDateTime.now().plusDays(1);   // 1-я попытка — через 1 день
+                case 2 -> LocalDateTime.now().plusDays(3);   // 2-я — через 3 дня
+                default -> LocalDateTime.now().plusDays(7);  // 3-я — через 7 дней
+            };
+            invoice.setNextRetryAt(nextRetry);
+            log.info("Scheduling retry #{} for subscription {} at {}", currentAttempt, subscription.getId(), nextRetry);
+        } else {
+            subscription.setStatus("past_due");
+            subscriptionRepository.save(subscription);
+            log.warn("Max retry attempts reached for subscription {}. Marked as past_due.", subscription.getId());
+        }
     }
 
     private void extendSubscriptionPeriod(Invoice invoice) {

@@ -23,4 +23,10 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
             @Param("start") LocalDateTime start,
             @Param("end") LocalDateTime end
     );
+    @Query("SELECT i FROM Invoice i WHERE i.tenantId = :tenantId AND i.status = :status AND i.nextRetryAt <= :now")
+    List<Invoice> findByTenantIdAndStatusAndNextRetryAtBefore(
+            @Param("tenantId") String tenantId,
+            @Param("status") String status,
+            @Param("now") LocalDateTime now
+    );
 }
