@@ -35,10 +35,13 @@ public class CustomerService {
         customer.setFullName(encryptionService.encrypt(request.fullName()));
         customer.setPhone(encryptionService.encrypt(request.phone()));
         customer.setIsStudent(request.isStudent());
+
+        if (request.telegramUsername() != null && !request.telegramUsername().isBlank()) {
+            customer.setTelegramUsername(request.telegramUsername()); // ← сеттер автоматически уберёт @ и приведёт к нижнему регистру
+        }
+
         customer.setCreatedAt(LocalDateTime.now());
-
         Customer saved = customerRepository.save(customer);
-
         return convertToResponse(saved);
     }
 

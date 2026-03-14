@@ -39,6 +39,7 @@ public class PaymentService {
     private final ObjectMapper objectMapper;
     private final Environment environment;
     private final AccessService accessService;
+    private final NotificationService notificationService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) throws JsonProcessingException {
@@ -170,6 +171,7 @@ public class PaymentService {
                     plan.getCode(),
                     subscription.getCurrentPeriodEnd()
             );
+            notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
         }
 
         invoiceRepository.save(invoice);
@@ -256,11 +258,13 @@ public class PaymentService {
 
         subscription.setCurrentPeriodStart(newPeriodStart);
         subscription.setCurrentPeriodEnd(newPeriodEnd);
+
         subscription.setFailedPaymentAttempts(0);
         subscription.setPastDueSince(null);
 
-        if (subscription.equals("past_due")) {
+        if ("past_due".equals(subscription.getStatus())) {
             subscription.setStatus("active");
+            log.info("Subscription {} restored to active after successful payment", subscription.getId());
         }
 
         if (plan.getEndDate() == null || newPeriodEnd.isBefore(plan.getEndDate())) {
@@ -270,6 +274,8 @@ public class PaymentService {
         }
 
         subscriptionRepository.save(subscription);
+        log.info("Subscription {} extended: {} → {}",
+                subscription.getId(), newPeriodStart, newPeriodEnd);
     }
 
     private void validatePaymentMethod(String paymentMethod) {

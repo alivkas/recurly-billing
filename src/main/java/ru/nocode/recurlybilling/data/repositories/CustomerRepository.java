@@ -14,4 +14,6 @@ public interface CustomerRepository extends JpaRepository<Customer, UUID> {
     Long countByTenantId(String tenantId);
     Optional<Customer> findByTenantIdAndExternalId(String tenantId, String externalId);
     boolean existsByTenantIdAndExternalId(String tenantId, String externalId);
+    Optional<Customer> findByTenantIdAndTelegramUsernameIgnoreCase(String tenantId, String telegramUsername);
+    Optional<Customer> findByTelegramChatId(Long chatId);
 }

@@ -38,6 +38,7 @@ public class SubscriptionService {
     private final ObjectMapper objectMapper;
     private final TenantService tenantService;
     private final AccessService accessService;
+    private final NotificationService notificationService;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) throws JsonProcessingException {
@@ -133,17 +134,24 @@ public class SubscriptionService {
         Subscription subscription = subscriptionRepository.findById(subscriptionId)
                 .orElseThrow(() -> new IllegalArgumentException("Subscription not found"));
 
+        Plan plan = planRepository.findById(subscription.getPlanId())
+                .orElseThrow();
+
+        List<Invoice> invoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId);
+        if (invoices.isEmpty()) return;
+        Invoice lastInvoice = invoices.get(0);
+
         int failedAttempts = subscription.getFailedPaymentAttempts() + 1;
         subscription.setFailedPaymentAttempts(failedAttempts);
         subscription.setStatus("past_due");
         subscription.setPastDueSince(LocalDateTime.now());
         subscriptionRepository.save(subscription);
 
+        notificationService.sendPaymentFailedNotification(subscription, lastInvoice, plan);
+
         if (failedAttempts >= 3) {
             try {
                 Customer customer = customerRepository.findById(subscription.getCustomerId())
-                        .orElseThrow();
-                Plan plan = planRepository.findById(subscription.getPlanId())
                         .orElseThrow();
                 accessService.revokeAccessOnPaymentFailure(customer.getExternalId(), plan.getCode());
             } catch (Exception e) {

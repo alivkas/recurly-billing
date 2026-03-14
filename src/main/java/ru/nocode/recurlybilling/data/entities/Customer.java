@@ -34,6 +34,12 @@ public class Customer {
     @Comment("Encrypted using AES/GCM")
     private String email;
 
+    @Column(name = "telegram_username")
+    private String telegramUsername;
+
+    @Column(name = "telegram_chat_id")
+    private Long telegramChatId;
+
     @Column(name = "full_name", columnDefinition = "text")
     private String fullName;
 

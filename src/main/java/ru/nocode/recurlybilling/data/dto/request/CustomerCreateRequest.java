@@ -20,6 +20,9 @@ public record CustomerCreateRequest(
         String phone,
 
         @NotNull(message = "Student status is required")
-        Boolean isStudent
+        Boolean isStudent,
+
+        @Pattern(regexp = "^[a-zA-Z0-9_]{5,32}$", message = "Telegram username must be 5-32 characters (letters, digits, underscore)")
+        String telegramUsername
 
 ) {}

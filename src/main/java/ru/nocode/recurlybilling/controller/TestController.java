@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import ru.nocode.recurlybilling.services.NotificationService;
 import ru.nocode.recurlybilling.services.SubscriptionService;
 
 @RestController()
@@ -11,6 +12,7 @@ import ru.nocode.recurlybilling.services.SubscriptionService;
 public class TestController {
 
     private final SubscriptionService subscriptionService;
+    private final NotificationService notificationService;
 
     @GetMapping("/test-billing")
     public ResponseEntity<String> triggerBilling() {
@@ -23,4 +25,10 @@ public class TestController {
         subscriptionService.processScheduledBilling();
         return ResponseEntity.ok("Trial end processing triggered");
     }
+
+//    @GetMapping("/test-notify")
+//    public ResponseEntity<String> testNotify() {
+//        notificationService.sendPaymentReminderNotifications();
+//        return ResponseEntity.ok("Notificated");
+//    }
 }
