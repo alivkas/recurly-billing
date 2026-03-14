@@ -189,11 +189,7 @@ public class SubscriptionService {
             subscription.setCurrentPeriodEnd(calculateNextPeriodEnd(start, plan));
         }
 
-        if ("semester".equals(plan.getInterval()) || "custom".equals(plan.getInterval())) {
-            subscription.setNextBillingDate(null);
-        } else {
-            subscription.setNextBillingDate(subscription.getCurrentPeriodEnd().plusDays(1));
-        }
+        subscription.setNextBillingDate(subscription.getCurrentPeriodEnd().plusDays(1));
     }
 
     private LocalDate calculateNextPeriodEnd(LocalDate start, Plan plan) {

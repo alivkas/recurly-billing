@@ -13,7 +13,6 @@ import java.util.Map;
 public class YooKassaPaymentRequest {
 
     private Amount amount;
-    private String paymentMethod;
     private String description;
     @JsonProperty("confirmation")
     private Confirmation confirmation;
@@ -21,6 +20,10 @@ public class YooKassaPaymentRequest {
     private Map<String, Object> metadata;
     @JsonProperty("capture")
     private Boolean capture = true;
+
+    private PaymentMethodData paymentMethodData;
+    private Boolean savePaymentMethod;
+    private String paymentMethodId;
 
     @Data
     @NoArgsConstructor
@@ -39,6 +42,15 @@ public class YooKassaPaymentRequest {
 
         public Confirmation(String returnUrl) {
             this.returnUrl = returnUrl;
+        }
+    }
+
+    @Data
+    public static class PaymentMethodData {
+        private String type;
+
+        public PaymentMethodData(String type) {
+            this.type = type;
         }
     }
 }

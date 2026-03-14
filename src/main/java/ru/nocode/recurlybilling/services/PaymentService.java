@@ -59,6 +59,13 @@ public class PaymentService {
 
             YooKassaPaymentResponse response = yooKassaClient.createPayment(request, idempotencyKey);
 
+            if (response.getPaymentMethod() != null &&
+                    response.getPaymentMethod().getId() != null &&
+                    subscription.getPaymentMethodId() == null) {
+                subscription.setPaymentMethodId(response.getPaymentMethod().getId());
+                subscriptionRepository.save(subscription);
+            }
+
             String confirmationUrl = null;
             if (response.getConfirmation() != null &&
                     "redirect".equals(response.getConfirmation().getType())) {
@@ -93,9 +100,9 @@ public class PaymentService {
     }
 
     @Transactional
-    public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> metadata, String tenantId) {
+    public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> webhook, String tenantId) {
         Invoice invoice = invoiceRepository.findByPaymentId(paymentId)
-                .orElseThrow(() -> new IllegalArgumentException("Invoice with paymentId '" + paymentId + "' not found"));
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found: " + paymentId));
 
         if (!invoice.getTenantId().equals(tenantId)) {
             throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
@@ -106,8 +113,22 @@ public class PaymentService {
         invoice.setStatus(mappedStatus);
         invoice.setUpdatedAt(LocalDateTime.now());
 
+        Map<String, Object> payment = (Map<String, Object>) webhook.get("object");
+        Map<String, Object> metadata = (Map<String, Object>) payment.get("metadata");
+
         if (metadata != null && !metadata.isEmpty()) {
             invoice.setMetadata(objectMapper.valueToTree(metadata));
+        }
+
+        Map<String, Object> paymentMethod = (Map<String, Object>) payment.get("payment_method");
+        if (paymentMethod != null) {
+            String pmId = (String) paymentMethod.get("id");
+            if (pmId != null) {
+                Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
+                        .orElseThrow(() -> new IllegalStateException("Subscription not found"));
+                subscription.setPaymentMethodId(pmId);
+                subscriptionRepository.save(subscription);
+            }
         }
 
         if ("paid".equals(mappedStatus) && !"paid".equals(oldStatus)) {
@@ -115,8 +136,7 @@ public class PaymentService {
         }
 
         invoiceRepository.save(invoice);
-        log.info("Webhook processed: paymentId={}, oldStatus={}, newStatus={}, tenant={}",
-                paymentId, oldStatus, mappedStatus, tenantId);
+        log.info("Webhook processed: paymentId={}, status={}, tenant={}", paymentId, mappedStatus, tenantId);
     }
 
     @Transactional(readOnly = true)
@@ -209,12 +229,18 @@ public class PaymentService {
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         request.setAmount(new YooKassaPaymentRequest.Amount((long) amountRub.doubleValue(), "RUB"));
 
-        request.setPaymentMethod(invoice.getPaymentMethod() != null ? invoice.getPaymentMethod() : "bank_card");
-        request.setDescription("Оплата подписки #" + invoice.getId());
+        if (subscription.getPaymentMethodId() != null) {
+            request.setPaymentMethodId(subscription.getPaymentMethodId());
+        } else {
+            request.setPaymentMethodData(new YooKassaPaymentRequest.PaymentMethodData("bank_card"));
+            request.setSavePaymentMethod(true);
 
-        String returnUrl = environment.getProperty("payment.return-url",
-                "https://default.example.com/payment/success?tenant=" + subscription.getTenantId());
-        request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl));
+            String returnUrl = environment.getProperty("payment.return-url",
+                    "https://default.example.com/payment/success?tenant=" + subscription.getTenantId());
+            request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl));
+        }
+
+        request.setDescription("Оплата подписки #" + invoice.getId());
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("subscriptionId", subscription.getId().toString());

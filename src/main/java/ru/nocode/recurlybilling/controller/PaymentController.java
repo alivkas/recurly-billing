@@ -1,5 +1,6 @@
 package ru.nocode.recurlybilling.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -23,36 +24,31 @@ public class PaymentController {
     private final YooKassaSignatureValidator signatureValidator;
     private final org.springframework.core.env.Environment environment;
 
-    /**
-     * Вебхук от ЮKassa (обработка уведомлений о статусе платежа)
-     */
     @PostMapping("/webhook")
     public ResponseEntity<Void> handleYooKassaWebhook(
-            @RequestHeader("X-Signature") String signature,
+            @RequestHeader(value = "X-Signature", required = false) String signature,
             @RequestBody String requestBody) {
 
-        log.info("Received webhook from YooKassa with signature: {}", signature.substring(0, Math.min(16, signature.length())) + "...");
+        log.info("Received webhook from YooKassa");
 
         String secretKey = environment.getProperty("yookassa.secret-key");
         if (secretKey == null || secretKey.trim().isEmpty()) {
-            log.error("YooKassa secret key not configured in application.properties");
+            log.error("YooKassa secret key not configured");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
 
-        // TODO ПОДПИСЬ ВЕБХУКА
 //        if (!signatureValidator.isValid(signature, requestBody, secretKey)) {
-//            log.warn("Invalid webhook signature from YooKassa");
+//            log.warn("Invalid webhook signature");
 //            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
 //        }
 
         try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            ObjectMapper mapper = new ObjectMapper();
             Map<String, Object> webhook = mapper.readValue(requestBody, Map.class);
             String eventType = (String) webhook.get("event");
 
             if (eventType != null && eventType.startsWith("payment.")) {
-                Map<String, Object> object = (Map<String, Object>) webhook.get("object");
-                Map<String, Object> payment = (Map<String, Object>) object.get("payment");
+                Map<String, Object> payment = (Map<String, Object>) webhook.get("object");
 
                 String paymentId = (String) payment.get("id");
                 String status = (String) payment.get("status");
@@ -96,5 +92,10 @@ public class PaymentController {
             log.error("Error retrieving payment: {}", paymentId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
+    }
+
+    @GetMapping("/success")
+    public String success() {
+        return "Оплата успешна!";
     }
 }

@@ -19,6 +19,7 @@ public class YooKassaPaymentResponse {
     private LocalDateTime paidAt;
     @JsonProperty("metadata")
     private java.util.Map<String, Object> metadata;
+    private PaymentMethod paymentMethod;
 
     @Data
     public static class Amount {
@@ -33,5 +34,11 @@ public class YooKassaPaymentResponse {
         private String confirmationUrl;
         @JsonProperty("return_url")
         private String returnUrl;
+    }
+
+    @Data
+    public static class PaymentMethod {
+        private String id;
+        private String type;
     }
 }
