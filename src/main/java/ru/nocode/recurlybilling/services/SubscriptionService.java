@@ -160,14 +160,17 @@ public class SubscriptionService {
     @Transactional
     public void processBillingForTenant(String tenantId) {
         LocalDate today = LocalDate.now();
-
         List<Subscription> dueSubscriptions = subscriptionRepository
                 .findByTenantIdAndStatusAndNextBillingDateBefore(tenantId, "active", today.plusDays(1));
 
         for (Subscription subscription : dueSubscriptions) {
+            if ("cancelled".equals(subscription.getStatus())) {
+                log.info("Skipping cancelled subscription: {}", subscription.getId());
+                continue;
+            }
+
             try {
                 String idempotencyKey = "sched_" + UUID.randomUUID().toString().replace("-", "");
-
                 paymentService.createPaymentForSubscription(subscription, idempotencyKey);
                 log.info("Scheduled payment created for subscription {}", subscription.getId());
             } catch (Exception e) {
