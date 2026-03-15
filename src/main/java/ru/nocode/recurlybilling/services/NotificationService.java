@@ -28,6 +28,7 @@ public class NotificationService {
     private final CustomerRepository customerRepository;
     private final TelegramBot telegramBot;
     private final EncryptionService encryptionService;
+    private final StudentAuthService studentAuthService;
 
     @Value("${notifications.telegram.enabled:true}")
     private boolean telegramEnabled;
@@ -78,25 +79,37 @@ public class NotificationService {
         Tenant tenant = tenantRepository.findById(subscription.getTenantId())
                 .orElseThrow(() -> new IllegalStateException("Tenant not found"));
 
+        Customer customer = customerRepository.findById(subscription.getCustomerId())
+                .orElseThrow(() -> new IllegalStateException("Customer not found for subscription"));
+
         Long telegramChatId = getCustomerTelegramChatId(subscription.getCustomerId(), tenant.getTenantId());
 
         if (telegramEnabled && telegramChatId != null) {
+            String tempCode = studentAuthService.generateTemporaryCode(
+                    subscription.getTenantId(),
+                    customer.getExternalId()
+            );
+
             String message = String.format("""
-                ✅ <b>Платёж успешен</b>
-                
-                Здравствуйте, %s!
-                
-                Ваш платёж на сумму <b>%s ₽</b> за подписку «%s» успешно проведён.
-                
-                ID платежа: <code>%s</code>
-                Следующее списание: <b>%s</b>
-                
-                С уважением,
-                команда %s.
-                """,
+            ✅ <b>Платёж успешен</b>
+            
+            Здравствуйте, %s!
+            
+            Ваш платёж на сумму <b>%s ₽</b> за подписку «%s» успешно проведён.
+            
+            📌 <b>Ваш код для входа в личный кабинет:</b> <code>%s</code>
+            Действует 24 часа. Используйте его на странице входа.
+            
+            ID платежа: <code>%s</code>
+            Следующее списание: <b>%s</b>
+            
+            С уважением,
+            команда %s.
+            """,
                     getCustomerName(subscription.getCustomerId(), tenant.getTenantId()),
                     invoice.getAmountCents() / 100.0,
                     plan.getName(),
+                    tempCode,
                     invoice.getPaymentId(),
                     subscription.getNextBillingDate(),
                     tenant.getName()
@@ -187,7 +200,6 @@ public class NotificationService {
             String bodyTemplate) {
 
         Notification notification = new Notification();
-        notification.setId(UUID.randomUUID());
         notification.setTenantId(subscription.getTenantId());
         notification.setSubscriptionId(subscription.getId());
         notification.setType(type);
@@ -257,6 +269,48 @@ public class NotificationService {
             } catch (Exception e) {
                 log.error("Error processing notifications for tenant {}", tenantId, e);
             }
+        }
+    }
+
+    @Transactional
+    public void sendTrialEndingNotification(Subscription subscription, Plan plan) {
+        Tenant tenant = tenantRepository.findById(subscription.getTenantId())
+                .orElseThrow(() -> new IllegalStateException("Tenant not found"));
+
+        Long telegramChatId = getCustomerTelegramChatId(subscription.getCustomerId(), tenant.getTenantId());
+
+        if (telegramEnabled && telegramChatId != null) {
+            String message = String.format("""
+            ⏳ <b>Пробный период заканчивается</b>
+            
+            Здравствуйте, %s!
+            
+            Ваш пробный период для курса «%s» заканчивается %s.
+            
+            Для продолжения доступа к материалам завтра будет списано <b>%s ₽</b>.
+            
+            Если вы не хотите продолжать подписку — отмените её до окончания пробного периода.
+            
+            С уважением,
+            команда %s.
+            """,
+                    getCustomerName(subscription.getCustomerId(), tenant.getTenantId()),
+                    plan.getName(),
+                    subscription.getTrialEnd(),
+                    plan.getPriceCents() / 100.0,
+                    tenant.getName()
+            );
+
+            Notification notification = createNotification(
+                    subscription,
+                    "trial_ending",
+                    "telegram",
+                    telegramChatId.toString(),
+                    "⏳ Пробный период заканчивается",
+                    message
+            );
+
+            sendTelegramNotificationAsync(notification, message);
         }
     }
 }

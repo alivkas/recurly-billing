@@ -22,7 +22,7 @@ public class StudentAccess {
     private UUID id;
 
     @Column(name = "student_id", nullable = false)
-    private String studentId;
+    private UUID studentId;
 
     @Column(name = "tenant_id", nullable = false)
     private String tenantId;

@@ -11,11 +11,19 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import ru.nocode.recurlybilling.data.entities.Customer;
+import ru.nocode.recurlybilling.data.entities.Plan;
+import ru.nocode.recurlybilling.data.entities.Subscription;
 import ru.nocode.recurlybilling.data.entities.Tenant;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
+import ru.nocode.recurlybilling.data.repositories.PlanRepository;
+import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
 import ru.nocode.recurlybilling.data.repositories.TenantRepository;
+import ru.nocode.recurlybilling.services.AccessService;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -24,6 +32,9 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private final CustomerRepository customerRepository;
     private final TenantRepository tenantRepository;
+    private final SubscriptionRepository subscriptionRepository;
+    private final PlanRepository planRepository;
+    private final AccessService accessService;
 
     @Value("${telegram.bot.token}")
     private String botToken;
@@ -55,9 +66,10 @@ public class TelegramBot extends TelegramLongPollingBot {
                         chatId, username, text);
                 if (text.startsWith("/start")) {
                     handleStartCommand(chatId, username, from.getFirstName(), text);
-                }
-                else if ("/status".equalsIgnoreCase(text)) {
+                } else if ("/status".equalsIgnoreCase(text)) {
                     handleStatusCommand(chatId, username);
+                } else if ("/cancel".equalsIgnoreCase(text)) {
+                    handleCancelCommand(chatId, username);
                 }
                 else {
                     sendHelpMessage(chatId);
@@ -230,5 +242,56 @@ public class TelegramBot extends TelegramLongPollingBot {
             log.error("❌ Failed to send Telegram message with HTML to chatId: {}", chatId, e);
             return false;
         }
+    }
+
+    private void handleCancelCommand(long chatId, String username) {
+        if (username == null || username.isEmpty()) {
+            sendMessage(chatId,
+                    "❌ У вас не установлен публичный username в Telegram.\n\n" +
+                            "Установите его в настройках профиля и отправьте /start");
+            return;
+        }
+
+        // Ищем клиента по username (временно хардкодим тенант)
+        Optional<Customer> customerOpt = customerRepository
+                .findByTenantIdAndTelegramUsernameIgnoreCase("moscow_digital", username);
+
+        if (customerOpt.isEmpty() || customerOpt.get().getTelegramChatId() == null) {
+            sendMessage(chatId,
+                    "⚠️ Ваш аккаунт не привязан к системе оплаты.\n\n" +
+                            "Отправьте /start для привязки.");
+            return;
+        }
+
+        Customer customer = customerOpt.get();
+        List<Subscription> subscriptions = subscriptionRepository
+                .findByTenantIdAndCustomerExternalId("moscow_digital", customer.getExternalId());
+
+        Subscription activeSub = subscriptions.stream()
+                .filter(s -> "active".equals(s.getStatus()) || "trialing".equals(s.getStatus()))
+                .findFirst()
+                .orElse(null);
+
+        if (activeSub == null) {
+            sendMessage(chatId, "❌ У вас нет активной подписки для отмены.");
+            return;
+        }
+
+        activeSub.setStatus("cancelled");
+        activeSub.setCancelAt(LocalDate.now());
+        subscriptionRepository.save(activeSub);
+
+        Plan plan = planRepository.findById(activeSub.getPlanId()).orElseThrow();
+        accessService.revokeAccessImmediately(UUID.fromString(customer.getExternalId()), plan.getCode());
+
+        String message = String.format("""
+        ⚠️ <b>Подписка отменена</b>
+        
+        Доступ к курсу «%s» закрыт немедленно.
+        Спасибо за использование сервиса!
+        """, plan.getName());
+
+        sendMessageWithHtml(chatId, message);
+        log.info("Subscription cancelled via Telegram for customer {}", customer.getExternalId());
     }
 }

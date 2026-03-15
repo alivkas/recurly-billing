@@ -50,7 +50,7 @@ public class Subscription {
     @Column(name = "current_period_start", nullable = false)
     private LocalDate currentPeriodStart;
 
-    @Column(name = "current_period_end", nullable = false)
+    @Column(name = "current_period_end", nullable = true)
     private LocalDate currentPeriodEnd;
 
     @Column(name = "next_billing_date")

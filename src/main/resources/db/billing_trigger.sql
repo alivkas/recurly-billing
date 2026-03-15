@@ -2,8 +2,8 @@ SELECT id, next_billing_date FROM subscriptions WHERE tenant_id = 'moscow_digita
 
 UPDATE subscriptions
 SET next_billing_date = CURRENT_DATE
-WHERE id = 'ba1a64d1-43c1-4337-89fa-4acf7e0d2cfb';
+WHERE id = '6255878c-d579-48ac-8bac-beacacf286ba';
 
-UPDATE subscriptions
-SET trial_end = CURRENT_DATE
-WHERE status = 'trialing';
+-- UPDATE subscriptions
+-- SET trial_end = CURRENT_DATE
+-- WHERE status = 'trialing';

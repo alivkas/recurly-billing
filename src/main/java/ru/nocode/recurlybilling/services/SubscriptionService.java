@@ -60,15 +60,18 @@ public class SubscriptionService {
         subscription.setTenantId(tenantId);
         subscription.setCustomerId(customer.getId());
         subscription.setPlanId(plan.getId());
-        subscription.setStatus("active");
         subscription.setCurrentPeriodStart(request.startDate() != null ? request.startDate() : LocalDate.now());
         subscription.setPaymentMethod(request.paymentMethod() != null ? request.paymentMethod() : "bank_card");
 
-        calculateSubscriptionDates(subscription, plan, request.startDate());
-
         if (plan.getTrialDays() != null && plan.getTrialDays() > 0) {
             subscription.setTrialEnd(subscription.getCurrentPeriodStart().plusDays(plan.getTrialDays()));
+            subscription.setCurrentPeriodEnd(subscription.getTrialEnd());
+            subscription.setNextBillingDate(null);
             subscription.setStatus("trialing");
+        } else {
+            subscription.setCurrentPeriodEnd(null);
+            subscription.setNextBillingDate(null);
+            subscription.setStatus("pending_payment");
         }
 
         subscription.setInterval(plan.getInterval());
@@ -174,7 +177,7 @@ public class SubscriptionService {
             try {
                 Customer customer = customerRepository.findById(subscription.getCustomerId())
                         .orElseThrow();
-                accessService.revokeAccessOnPaymentFailure(customer.getExternalId(), plan.getCode());
+                accessService.revokeAccessOnPaymentFailure(UUID.fromString(customer.getExternalId()), plan.getCode());
             } catch (Exception e) {
                 log.error("Failed to revoke access for subscription {}", subscriptionId, e);
             }
@@ -194,6 +197,31 @@ public class SubscriptionService {
                 processBillingForTenant(tenantId);
             } catch (Exception e) {
                 log.error("Error processing billing for tenant {}", tenantId, e);
+            }
+        }
+    }
+
+    @Scheduled(cron = "0 0 9 * * *", zone = "Europe/Moscow")
+    @Transactional
+    public void sendTrialEndingNotifications() {
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+
+        List<String> tenantIds = tenantRepository.findAllActiveTenantIds();
+        for (String tenantId : tenantIds) {
+            try {
+                List<Subscription> endingTrials = subscriptionRepository
+                        .findByTenantIdAndStatusAndTrialEndBefore(tenantId, "trialing", tomorrow.plusDays(1))
+                        .stream()
+                        .filter(s -> s.getTrialEnd() != null && !s.getTrialEnd().isBefore(tomorrow))
+                        .collect(Collectors.toList());
+
+                for (Subscription subscription : endingTrials) {
+                    Plan plan = planRepository.findById(subscription.getPlanId()).orElseThrow();
+                    notificationService.sendTrialEndingNotification(subscription, plan);
+                    log.info("Trial ending notification sent for subscription {}", subscription.getId());
+                }
+            } catch (Exception e) {
+                log.error("Error sending trial ending notifications for tenant {}", tenantId, e);
             }
         }
     }
@@ -234,6 +262,31 @@ public class SubscriptionService {
         }
     }
 
+    @Scheduled(cron = "0 0 1 * * *", zone = "Europe/Moscow")
+    @Transactional
+    public void revokeAccessForCancelledSubscriptions() {
+        LocalDate today = LocalDate.now();
+
+        List<Subscription> toRevoke = subscriptionRepository
+                .findByStatusAndCancelAtBefore("cancelled", today.plusDays(1));
+
+        for (Subscription sub : toRevoke) {
+            try {
+                Customer customer = customerRepository.findById(sub.getCustomerId()).orElseThrow();
+                Plan plan = planRepository.findById(sub.getPlanId()).orElseThrow();
+
+                accessService.revokeAccessOnPaymentFailure(
+                        UUID.fromString(customer.getExternalId()),
+                        plan.getCode()
+                );
+
+                log.info("Access revoked for cancelled subscription: {}", sub.getId());
+            } catch (Exception e) {
+                log.error("Failed to revoke access for subscription {}", sub.getId(), e);
+            }
+        }
+    }
+
     private void processFailedPaymentsForTenant(String tenantId) {
         LocalDateTime now = LocalDateTime.now();
         List<Invoice> retryableInvoices = invoiceRepository
@@ -264,7 +317,7 @@ public class SubscriptionService {
 
     private void calculateSubscriptionDates(Subscription subscription, Plan plan, LocalDate start) {
         if ("semester".equals(plan.getInterval()) || "custom".equals(plan.getInterval())) {
-            LocalDate end = plan.getEndDate() != null ? plan.getEndDate() : start.plusMonths(1);
+            LocalDate end = plan.getEndDate() != null ? plan.getEndDate() : start.plusMonths(1).minusDays(1);
             subscription.setCurrentPeriodEnd(end);
             subscription.setNextBillingDate(null);
         } else {
@@ -275,7 +328,6 @@ public class SubscriptionService {
             }
 
             subscription.setCurrentPeriodEnd(firstPeriodEnd);
-
             if (plan.getEndDate() == null || firstPeriodEnd.isBefore(plan.getEndDate())) {
                 subscription.setNextBillingDate(firstPeriodEnd.plusDays(1));
             } else {
@@ -291,16 +343,21 @@ public class SubscriptionService {
 
         for (Subscription subscription : expiredTrials) {
             try {
-                log.info("Processing expired trial for subscription: {}", subscription.getId());
-
                 Plan plan = planRepository.findById(subscription.getPlanId())
                         .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
-                LocalDate periodEnd = calculateNextPeriodEnd(subscription.getCurrentPeriodStart(), plan);
+                // 🔑 ВСЕГДА пересчитываем период после триала
+                LocalDate periodStart = subscription.getTrialEnd().plusDays(1);
+                LocalDate periodEnd = calculateNextPeriodEnd(periodStart, plan);
+
                 if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
                     periodEnd = plan.getEndDate();
                 }
+
+                subscription.setCurrentPeriodStart(periodStart);
                 subscription.setCurrentPeriodEnd(periodEnd);
+
+                // Устанавливаем nextBillingDate
                 if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
                     subscription.setNextBillingDate(periodEnd.plusDays(1));
                 } else {
@@ -310,21 +367,24 @@ public class SubscriptionService {
                 subscription.setStatus("active");
                 subscriptionRepository.save(subscription);
 
+                // Создаём платёж
                 String idempotencyKey = "trial_end_" + subscription.getId() + "_" + System.currentTimeMillis();
                 paymentService.createPaymentForSubscription(subscription, idempotencyKey);
 
-                log.info("Trial ended and first payment created for subscription: {}", subscription.getId());
-
+                log.info("✅ Trial ended: subscription {} | period: {} → {} | next_billing: {}",
+                        subscription.getId(), periodStart, periodEnd, subscription.getNextBillingDate());
             } catch (Exception e) {
-                log.error("Failed to process expired trial for subscription: {}", subscription.getId(), e);
+                log.error("❌ Failed to process expired trial for subscription: {}", subscription.getId(), e);
             }
         }
     }
 
     private LocalDate calculateNextPeriodEnd(LocalDate start, Plan plan) {
         return switch (plan.getInterval()) {
-            case "month" -> start.plusMonths(plan.getIntervalCount());
-            case "year" -> start.plusYears(plan.getIntervalCount());
+            case "month" ->
+                    start.plusMonths(plan.getIntervalCount()).minusDays(1);
+            case "year" ->
+                    start.plusYears(plan.getIntervalCount()).minusDays(1);
             case "semester" -> {
                 if (start.getMonthValue() >= 9) {
                     yield LocalDate.of(start.getYear(), 12, 31);
@@ -334,8 +394,10 @@ public class SubscriptionService {
                     yield LocalDate.of(start.getYear() + 1, 12, 31);
                 }
             }
-            case "custom" -> plan.getEndDate() != null ? plan.getEndDate() : start.plusMonths(1);
-            default -> throw new IllegalArgumentException("Unsupported interval: " + plan.getInterval());
+            case "custom" ->
+                    plan.getEndDate() != null ? plan.getEndDate() : start.plusMonths(1).minusDays(1);
+            default ->
+                    start.plusMonths(1).minusDays(1);
         };
     }
 

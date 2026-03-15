@@ -45,4 +45,5 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
             String tenantId, String status, LocalDate trialEndBefore
     );
     boolean existsByTenantIdAndCustomerId(String tenantId, String studentId);
+    List<Subscription> findByStatusAndCancelAtBefore(String status, LocalDate date);
 }

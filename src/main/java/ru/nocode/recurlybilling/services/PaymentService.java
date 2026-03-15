@@ -120,17 +120,12 @@ public class PaymentService {
     @Transactional
     public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> webhook, String tenantId) {
         Optional<Invoice> invoiceOpt = invoiceRepository.findByPaymentId(paymentId);
-
         if (invoiceOpt.isEmpty()) {
             log.warn("Invoice not found for paymentId: {}. Skipping webhook processing.", paymentId);
             return;
         }
 
         Invoice invoice = invoiceOpt.get();
-        if (!invoice.getTenantId().equals(tenantId)) {
-            throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
-        }
-
         if (!invoice.getTenantId().equals(tenantId)) {
             throw new SecurityException("Invoice does not belong to tenant: " + tenantId);
         }
@@ -142,7 +137,6 @@ public class PaymentService {
 
         Map<String, Object> payment = (Map<String, Object>) webhook.get("object");
         Map<String, Object> metadata = (Map<String, Object>) payment.get("metadata");
-
         if (metadata != null && !metadata.isEmpty()) {
             invoice.setMetadata(objectMapper.valueToTree(metadata));
         }
@@ -159,30 +153,54 @@ public class PaymentService {
         }
 
         if ("paid".equals(mappedStatus) && !"paid".equals(oldStatus)) {
-            extendSubscriptionPeriod(invoice);
-
             Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
                     .orElseThrow();
-            Plan plan = planRepository.findById(subscription.getPlanId())
-                    .orElseThrow();
 
-            accessService.grantAccess(
-                    subscription.getTenantId(),
-                    String.valueOf(subscription.getCustomerId()),
-                    plan.getCode(),
-                    subscription.getCurrentPeriodEnd()
-            );
+            List<Invoice> allInvoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscription.getId());
+            boolean isFirstPayment = allInvoices.size() == 1;
 
-            auditLogService.logPaymentSuccess(
-                    tenantId,
-                    subscription.getCustomerId().toString(),
-                    paymentId,
-                    invoice.getAmountCents(),
-                    "127.0.0.1",
-                    "YooKassa Webhook"
-            );
+            if (isFirstPayment) {
+                LocalDate paymentDate = LocalDate.now();
+                subscription.setCurrentPeriodStart(paymentDate);
 
-            notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
+                Plan plan = planRepository.findById(subscription.getPlanId())
+                        .orElseThrow(() -> new IllegalStateException("Plan not found"));
+
+                LocalDate periodEnd = calculateNextPeriodEnd(paymentDate, plan);
+                if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
+                    periodEnd = plan.getEndDate();
+                }
+                subscription.setCurrentPeriodEnd(periodEnd);
+
+                if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
+                    subscription.setNextBillingDate(periodEnd.plusDays(1));
+                } else {
+                    subscription.setNextBillingDate(null);
+                }
+
+                subscription.setStatus("active");
+                subscriptionRepository.save(subscription);
+
+                accessService.grantAccess(
+                        subscription.getTenantId(),
+                        subscription.getCustomerId(),
+                        plan.getCode(),
+                        subscription.getCurrentPeriodEnd()
+                );
+
+                auditLogService.logPaymentSuccess(
+                        tenantId,
+                        subscription.getCustomerId().toString(),
+                        paymentId,
+                        invoice.getAmountCents(),
+                        "127.0.0.1",
+                        "YooKassa Webhook"
+                );
+                notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
+
+            } else {
+                extendSubscriptionPeriod(invoice);
+            }
         }
 
         invoiceRepository.save(invoice);
@@ -262,12 +280,12 @@ public class PaymentService {
     private void extendSubscriptionPeriod(Invoice invoice) {
         Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
                 .orElseThrow(() -> new IllegalStateException("Subscription not found"));
-
         Plan plan = planRepository.findById(subscription.getPlanId())
                 .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
         LocalDate newPeriodStart = subscription.getCurrentPeriodEnd().plusDays(1);
-        LocalDate newPeriodEnd = calculateNextPeriodEnd(newPeriodStart, plan);
+
+        LocalDate newPeriodEnd = calculateNextPeriodEnd(newPeriodStart, plan).minusDays(1);
 
         if (plan.getEndDate() != null && newPeriodEnd.isAfter(plan.getEndDate())) {
             newPeriodEnd = plan.getEndDate();
@@ -281,13 +299,11 @@ public class PaymentService {
 
         subscription.setCurrentPeriodStart(newPeriodStart);
         subscription.setCurrentPeriodEnd(newPeriodEnd);
-
         subscription.setFailedPaymentAttempts(0);
         subscription.setPastDueSince(null);
 
         if ("past_due".equals(subscription.getStatus())) {
             subscription.setStatus("active");
-            log.info("Subscription {} restored to active after successful payment", subscription.getId());
         }
 
         if (plan.getEndDate() == null || newPeriodEnd.isBefore(plan.getEndDate())) {
@@ -297,8 +313,6 @@ public class PaymentService {
         }
 
         subscriptionRepository.save(subscription);
-        log.info("Subscription {} extended: {} → {}",
-                subscription.getId(), newPeriodStart, newPeriodEnd);
     }
 
     private void validatePaymentMethod(String paymentMethod) {

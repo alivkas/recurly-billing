@@ -24,7 +24,7 @@ public class AccessService {
     private final PlanRepository planRepository;
 
     @Transactional
-    public void grantAccess(String tenantId, String customerId, String planCode, LocalDate periodEnd) {
+    public void grantAccess(String tenantId, UUID customerId, String planCode, LocalDate periodEnd) {
         List<StudentAccess> active = accessRepository.findByStudentIdAndPlanCodeAndStatus(
                 customerId, planCode, StudentAccess.AccessStatus.ACTIVE
         );
@@ -77,7 +77,22 @@ public class AccessService {
         log.info("Deactivated {} expired accesses", count);
     }
 
-    public boolean hasActiveAccess(String studentId, String planCode) {
+    @Transactional
+    public void revokeAccessImmediately(UUID studentId, String planCode) {
+        List<StudentAccess> accesses = accessRepository
+                .findByStudentIdAndPlanCodeAndStatus(
+                        studentId, planCode, StudentAccess.AccessStatus.ACTIVE
+                );
+
+        for (StudentAccess access : accesses) {
+            access.setStatus(StudentAccess.AccessStatus.REVOKED);
+            access.setAccessExpiresAt(LocalDate.now());
+        }
+        accessRepository.saveAll(accesses);
+        log.info("Access immediately revoked for student {}", studentId);
+    }
+
+    public boolean hasActiveAccess(UUID studentId, String planCode) {
         List<StudentAccess> accesses = accessRepository.findByStudentIdAndPlanCodeAndStatus(
                 studentId, planCode, StudentAccess.AccessStatus.ACTIVE
         );
@@ -86,7 +101,7 @@ public class AccessService {
                 .anyMatch(access -> !access.getAccessExpiresAt().isBefore(today));
     }
 
-    public LocalDate getAccessExpiry(String studentId, String planCode) {
+    public LocalDate getAccessExpiry(UUID studentId, String planCode) {
         return accessRepository.findByStudentIdAndPlanCodeAndStatus(studentId, planCode, StudentAccess.AccessStatus.ACTIVE)
                 .stream()
                 .findFirst()
@@ -100,7 +115,7 @@ public class AccessService {
         return belongsToTenant;
     }
 
-    public void revokeAccessOnPaymentFailure(String customerId, String planCode) {
+    public void revokeAccessOnPaymentFailure(UUID customerId, String planCode) {
         List<StudentAccess> accesses = accessRepository.findByStudentIdAndPlanCodeAndStatus(
                 customerId, planCode, StudentAccess.AccessStatus.ACTIVE
         );

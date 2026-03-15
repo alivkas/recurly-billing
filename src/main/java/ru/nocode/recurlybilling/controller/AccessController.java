@@ -10,6 +10,7 @@ import ru.nocode.recurlybilling.services.AccessService;
 import ru.nocode.recurlybilling.services.SubscriptionService;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/access")
@@ -33,9 +34,9 @@ public class AccessController {
                     .body(new AccessCheckResponse(false, null, "STUDENT_NOT_FOUND", null));
         }
 
-        boolean hasAccess = accessService.hasActiveAccess(studentId, planCode);
+        boolean hasAccess = accessService.hasActiveAccess(UUID.fromString(studentId), planCode);
         if (hasAccess) {
-            LocalDate expiresAt = accessService.getAccessExpiry(studentId, planCode);
+            LocalDate expiresAt = accessService.getAccessExpiry(UUID.fromString(studentId), planCode);
             return ResponseEntity.ok(new AccessCheckResponse(true, expiresAt, "HAS_ACCESS", null));
         } else {
             return ResponseEntity.ok(new AccessCheckResponse(false, null, "NO_ACTIVE_ACCESS", null));

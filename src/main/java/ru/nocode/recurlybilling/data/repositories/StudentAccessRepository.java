@@ -12,7 +12,7 @@ import java.util.UUID;
 
 @Repository
 public interface StudentAccessRepository extends JpaRepository<StudentAccess, UUID> {
-    List<StudentAccess> findByStudentIdAndPlanCodeAndStatus(String studentId, String planCode, StudentAccess.AccessStatus status);
+    List<StudentAccess> findByStudentIdAndPlanCodeAndStatus(UUID studentId, String planCode, StudentAccess.AccessStatus status);
     List<StudentAccess> findByAccessExpiresAtBeforeAndStatus(LocalDate date, StudentAccess.AccessStatus status);
 
     @Query("SELECT CASE WHEN COUNT(a) > 0 THEN true ELSE false END " +
@@ -25,5 +25,5 @@ public interface StudentAccessRepository extends JpaRepository<StudentAccess, UU
                                @Param("planCode") String planCode,
                                @Param("today") LocalDate today);
 
-    boolean existsByStudentIdAndTenantId(String studentId, String tenantId);
+    boolean existsByStudentIdAndTenantId(UUID studentId, String tenantId);
 }
