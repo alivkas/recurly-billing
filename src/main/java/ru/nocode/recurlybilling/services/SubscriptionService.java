@@ -204,15 +204,15 @@ public class SubscriptionService {
     @Scheduled(cron = "0 0 9 * * *", zone = "Europe/Moscow")
     @Transactional
     public void sendTrialEndingNotifications() {
-        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        LocalDate threeDaysFromNow = LocalDate.now().plusDays(3);
 
         List<String> tenantIds = tenantRepository.findAllActiveTenantIds();
         for (String tenantId : tenantIds) {
             try {
                 List<Subscription> endingTrials = subscriptionRepository
-                        .findByTenantIdAndStatusAndTrialEndBefore(tenantId, "trialing", tomorrow.plusDays(1))
+                        .findByTenantIdAndStatusAndTrialEndBefore(tenantId, "trialing", threeDaysFromNow.plusDays(1))
                         .stream()
-                        .filter(s -> s.getTrialEnd() != null && !s.getTrialEnd().isBefore(tomorrow))
+                        .filter(s -> s.getTrialEnd() != null && !s.getTrialEnd().isBefore(threeDaysFromNow))
                         .collect(Collectors.toList());
 
                 for (Subscription subscription : endingTrials) {
@@ -346,7 +346,6 @@ public class SubscriptionService {
                 Plan plan = planRepository.findById(subscription.getPlanId())
                         .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
-                // 🔑 ВСЕГДА пересчитываем период после триала
                 LocalDate periodStart = subscription.getTrialEnd().plusDays(1);
                 LocalDate periodEnd = calculateNextPeriodEnd(periodStart, plan);
 
@@ -356,25 +355,22 @@ public class SubscriptionService {
 
                 subscription.setCurrentPeriodStart(periodStart);
                 subscription.setCurrentPeriodEnd(periodEnd);
+                subscription.setStatus("active");
 
-                // Устанавливаем nextBillingDate
                 if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
                     subscription.setNextBillingDate(periodEnd.plusDays(1));
                 } else {
                     subscription.setNextBillingDate(null);
                 }
 
-                subscription.setStatus("active");
                 subscriptionRepository.save(subscription);
 
-                // Создаём платёж
                 String idempotencyKey = "trial_end_" + subscription.getId() + "_" + System.currentTimeMillis();
                 paymentService.createPaymentForSubscription(subscription, idempotencyKey);
 
-                log.info("✅ Trial ended: subscription {} | period: {} → {} | next_billing: {}",
-                        subscription.getId(), periodStart, periodEnd, subscription.getNextBillingDate());
+                log.info("Trial ended for subscription {}. First payment created.", subscription.getId());
             } catch (Exception e) {
-                log.error("❌ Failed to process expired trial for subscription: {}", subscription.getId(), e);
+                log.error("Failed to process expired trial for subscription: {}", subscription.getId(), e);
             }
         }
     }

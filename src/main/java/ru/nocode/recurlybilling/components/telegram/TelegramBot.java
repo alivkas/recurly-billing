@@ -252,7 +252,6 @@ public class TelegramBot extends TelegramLongPollingBot {
             return;
         }
 
-        // Ищем клиента по username (временно хардкодим тенант)
         Optional<Customer> customerOpt = customerRepository
                 .findByTenantIdAndTelegramUsernameIgnoreCase("moscow_digital", username);
 
@@ -264,6 +263,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
 
         Customer customer = customerOpt.get();
+
         List<Subscription> subscriptions = subscriptionRepository
                 .findByTenantIdAndCustomerExternalId("moscow_digital", customer.getExternalId());
 
@@ -282,7 +282,11 @@ public class TelegramBot extends TelegramLongPollingBot {
         subscriptionRepository.save(activeSub);
 
         Plan plan = planRepository.findById(activeSub.getPlanId()).orElseThrow();
-        accessService.revokeAccessImmediately(UUID.fromString(customer.getExternalId()), plan.getCode());
+        accessService.revokeAccessImmediately(
+                customer.getExternalId(),
+                plan.getTenantId(),
+                plan.getCode()
+        );
 
         String message = String.format("""
         ⚠️ <b>Подписка отменена</b>

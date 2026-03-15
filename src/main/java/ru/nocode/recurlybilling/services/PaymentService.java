@@ -156,15 +156,15 @@ public class PaymentService {
             Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
                     .orElseThrow();
 
+            Plan plan = planRepository.findById(subscription.getPlanId())
+                    .orElseThrow(() -> new IllegalStateException("Plan not found"));
+
             List<Invoice> allInvoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscription.getId());
             boolean isFirstPayment = allInvoices.size() == 1;
 
             if (isFirstPayment) {
                 LocalDate paymentDate = LocalDate.now();
                 subscription.setCurrentPeriodStart(paymentDate);
-
-                Plan plan = planRepository.findById(subscription.getPlanId())
-                        .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
                 LocalDate periodEnd = calculateNextPeriodEnd(paymentDate, plan);
                 if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
@@ -181,26 +181,29 @@ public class PaymentService {
                 subscription.setStatus("active");
                 subscriptionRepository.save(subscription);
 
-                accessService.grantAccess(
-                        subscription.getTenantId(),
-                        subscription.getCustomerId(),
-                        plan.getCode(),
-                        subscription.getCurrentPeriodEnd()
-                );
-
-                auditLogService.logPaymentSuccess(
-                        tenantId,
-                        subscription.getCustomerId().toString(),
-                        paymentId,
-                        invoice.getAmountCents(),
-                        "127.0.0.1",
-                        "YooKassa Webhook"
-                );
-                notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
-
             } else {
                 extendSubscriptionPeriod(invoice);
+                subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
+                        .orElseThrow();
             }
+
+            accessService.grantAccess(
+                    subscription.getTenantId(),
+                    subscription.getCustomerId(),
+                    plan.getCode(),
+                    subscription.getCurrentPeriodEnd()
+            );
+
+            auditLogService.logPaymentSuccess(
+                    tenantId,
+                    subscription.getCustomerId().toString(),
+                    paymentId,
+                    invoice.getAmountCents(),
+                    "127.0.0.1",
+                    "YooKassa Webhook"
+            );
+
+            notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
         }
 
         invoiceRepository.save(invoice);

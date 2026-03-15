@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ru.nocode.recurlybilling.data.entities.Customer;
 import ru.nocode.recurlybilling.data.entities.StudentAccess;
+import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
 import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 import ru.nocode.recurlybilling.data.repositories.StudentAccessRepository;
 import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
@@ -22,6 +24,7 @@ public class AccessService {
     private final StudentAccessRepository accessRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final PlanRepository planRepository;
+    private final CustomerRepository customerRepository;
 
     @Transactional
     public void grantAccess(String tenantId, UUID customerId, String planCode, LocalDate periodEnd) {
@@ -78,18 +81,22 @@ public class AccessService {
     }
 
     @Transactional
-    public void revokeAccessImmediately(UUID studentId, String planCode) {
-        List<StudentAccess> accesses = accessRepository
-                .findByStudentIdAndPlanCodeAndStatus(
-                        studentId, planCode, StudentAccess.AccessStatus.ACTIVE
-                );
+    public void revokeAccessImmediately(String studentExternalId, String tenantId, String planCode) {
+        Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, studentExternalId)
+                .orElseThrow(() -> new IllegalArgumentException("Customer not found: " + studentExternalId));
+
+        List<StudentAccess> accesses = accessRepository.findByStudentIdAndPlanCodeAndStatus(
+                customer.getId(),
+                planCode,
+                StudentAccess.AccessStatus.ACTIVE
+        );
 
         for (StudentAccess access : accesses) {
             access.setStatus(StudentAccess.AccessStatus.REVOKED);
             access.setAccessExpiresAt(LocalDate.now());
         }
         accessRepository.saveAll(accesses);
-        log.info("Access immediately revoked for student {}", studentId);
+        log.info("Access immediately revoked for student {}", studentExternalId);
     }
 
     public boolean hasActiveAccess(UUID studentId, String planCode) {
