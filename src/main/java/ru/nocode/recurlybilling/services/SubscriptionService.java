@@ -68,6 +68,16 @@ public class SubscriptionService {
             subscription.setCurrentPeriodEnd(subscription.getTrialEnd());
             subscription.setNextBillingDate(null);
             subscription.setStatus("trialing");
+
+            if (Boolean.TRUE.equals(request.withAutoRenewal())) {
+                try {
+                    String bindingIdempotencyKey = "bind_" + idempotencyKey;
+                    paymentService.bindCardForTrial(subscription, bindingIdempotencyKey);
+                } catch (Exception e) {
+                    log.warn("Card binding failed for trial subscription {}, continuing without auto-renewal",
+                            subscription.getId(), e);
+                }
+            }
         } else {
             subscription.setCurrentPeriodEnd(null);
             subscription.setNextBillingDate(null);
@@ -204,7 +214,7 @@ public class SubscriptionService {
     @Scheduled(cron = "0 0 9 * * *", zone = "Europe/Moscow")
     @Transactional
     public void sendTrialEndingNotifications() {
-        LocalDate threeDaysFromNow = LocalDate.now().plusDays(3);
+        LocalDate threeDaysFromNow = LocalDate.now().plusDays(1);
 
         List<String> tenantIds = tenantRepository.findAllActiveTenantIds();
         for (String tenantId : tenantIds) {

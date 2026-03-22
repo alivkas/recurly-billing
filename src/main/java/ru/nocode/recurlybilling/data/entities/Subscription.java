@@ -33,6 +33,12 @@ public class Subscription {
     @Column(name = "plan_id", nullable = false)
     private UUID planId;
 
+    @Column(name = "card_bound_at")
+    private LocalDateTime cardBoundAt;
+
+    @Column(name = "auto_renewal_enabled")
+    private boolean autoRenewalEnabled = false;
+
     @Column(nullable = false)
     private String status;
 

@@ -116,10 +116,15 @@ public class AccessService {
                 .orElse(null);
     }
 
-    public boolean isStudentBelongsToTenant(String studentId, String tenantId) {
-        boolean belongsToTenant = subscriptionRepository
-                .existsByTenantIdAndCustomerId(tenantId, studentId);
-        return belongsToTenant;
+    public boolean isStudentBelongsToTenant(String studentExternalId, String tenantId) {
+        Customer customer = customerRepository.findByTenantIdAndExternalId(tenantId, studentExternalId)
+                .orElseThrow(() -> new IllegalArgumentException("Student not found: " + studentExternalId));
+
+        return subscriptionRepository.existsByTenantIdAndCustomerId(tenantId, customer.getId());
+    }
+
+    public boolean isStudentBelongsToTenantByExternalId(String studentExternalId, String tenantId) {
+        return customerRepository.existsByTenantIdAndExternalId(tenantId, studentExternalId);
     }
 
     public void revokeAccessOnPaymentFailure(UUID customerId, String planCode) {

@@ -17,6 +17,7 @@ public record SubscriptionCreateRequest(
 
         @Pattern(regexp = "bank_card|sbp|mir|apple_pay|google_pay",
                 message = "Supported payment methods: bank_card, sbp, mir, apple_pay, google_pay")
-        String paymentMethod
+        String paymentMethod,
 
+        Boolean withAutoRenewal
 ) {}

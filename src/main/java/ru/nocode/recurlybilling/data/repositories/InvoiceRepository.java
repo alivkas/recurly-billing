@@ -29,4 +29,5 @@ public interface InvoiceRepository extends JpaRepository<Invoice, UUID> {
             @Param("status") String status,
             @Param("now") LocalDateTime now
     );
+    Optional<Invoice> findBySubscriptionIdAndStatus(UUID id, String status);
 }

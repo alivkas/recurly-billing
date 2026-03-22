@@ -31,4 +31,10 @@ public class TestController {
         notificationService.sendScheduledUpcomingPaymentNotifications();
         return ResponseEntity.ok("Notificated");
     }
+
+    @GetMapping("/test-upcoming")
+    public ResponseEntity<String> testUpcoming() {
+        subscriptionService.sendTrialEndingNotifications();
+        return ResponseEntity.ok("Notificated");
+    }
 }

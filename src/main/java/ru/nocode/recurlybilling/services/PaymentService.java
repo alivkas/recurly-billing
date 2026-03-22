@@ -91,9 +91,11 @@ public class PaymentService {
             if ("paid".equals(mappedStatus)) {
                 if (subscription.getNextBillingDate() != null) {
                     extendSubscriptionPeriod(savedInvoice);
+                    subscription = subscriptionRepository.findById(invoice.getSubscriptionId()).orElseThrow();
                 } else {
                     log.info("First payment for subscription {}, no extension needed", subscription.getId());
                 }
+                onPaymentSuccess(savedInvoice, subscription.getTenantId(), savedInvoice.getPaymentId());
             }
 
             return new PaymentResponse(
@@ -118,7 +120,10 @@ public class PaymentService {
     }
 
     @Transactional
-    public void handleYooKassaWebhook(String paymentId, String status, Map<String, Object> webhook, String tenantId) {
+    public void handleYooKassaWebhook(String paymentId,
+                                      String status,
+                                      Map<String, Object> webhook,
+                                      String tenantId) {
         Optional<Invoice> invoiceOpt = invoiceRepository.findByPaymentId(paymentId);
         if (invoiceOpt.isEmpty()) {
             log.warn("Invoice not found for paymentId: {}. Skipping webhook processing.", paymentId);
@@ -132,10 +137,12 @@ public class PaymentService {
 
         String oldStatus = invoice.getStatus();
         String mappedStatus = mapYooKassaStatus(status);
+
         invoice.setStatus(mappedStatus);
         invoice.setUpdatedAt(LocalDateTime.now());
 
         Map<String, Object> payment = (Map<String, Object>) webhook.get("object");
+
         Map<String, Object> metadata = (Map<String, Object>) payment.get("metadata");
         if (metadata != null && !metadata.isEmpty()) {
             invoice.setMetadata(objectMapper.valueToTree(metadata));
@@ -151,63 +158,38 @@ public class PaymentService {
                 subscriptionRepository.save(subscription);
             }
         }
-
+        if ("canceled".equals(mappedStatus) && "authorization".equals(oldStatus)) {
+            log.info("Card binding authorization canceled (expected): paymentId={}", paymentId);
+            invoiceRepository.save(invoice);
+            return;
+        }
         if ("paid".equals(mappedStatus) && !"paid".equals(oldStatus)) {
             Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
                     .orElseThrow();
-
             Plan plan = planRepository.findById(subscription.getPlanId())
                     .orElseThrow(() -> new IllegalStateException("Plan not found"));
 
-            List<Invoice> allInvoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscription.getId());
-            boolean isFirstPayment = allInvoices.size() == 1;
+            if ("pending_deferred".equals(oldStatus)) {
+                handleTrialConversionToPaid(subscription, plan, invoice);
+            }
+            else {
+                List<Invoice> allInvoices = invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscription.getId());
+                boolean isFirstPayment = allInvoices.size() == 1;
 
-            if (isFirstPayment) {
-                LocalDate paymentDate = LocalDate.now();
-                subscription.setCurrentPeriodStart(paymentDate);
-
-                LocalDate periodEnd = calculateNextPeriodEnd(paymentDate, plan);
-                if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
-                    periodEnd = plan.getEndDate();
-                }
-                subscription.setCurrentPeriodEnd(periodEnd);
-
-                if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
-                    subscription.setNextBillingDate(periodEnd.plusDays(1));
+                if (isFirstPayment) {
+                    initializeFirstPaymentPeriods(subscription, plan);
                 } else {
-                    subscription.setNextBillingDate(null);
+                    extendSubscriptionPeriod(invoice);
+                    subscription = subscriptionRepository.findById(invoice.getSubscriptionId()).orElseThrow();
                 }
-
-                subscription.setStatus("active");
-                subscriptionRepository.save(subscription);
-
-            } else {
-                extendSubscriptionPeriod(invoice);
-                subscription = subscriptionRepository.findById(invoice.getSubscriptionId())
-                        .orElseThrow();
             }
 
-            accessService.grantAccess(
-                    subscription.getTenantId(),
-                    subscription.getCustomerId(),
-                    plan.getCode(),
-                    subscription.getCurrentPeriodEnd()
-            );
-
-            auditLogService.logPaymentSuccess(
-                    tenantId,
-                    subscription.getCustomerId().toString(),
-                    paymentId,
-                    invoice.getAmountCents(),
-                    "127.0.0.1",
-                    "YooKassa Webhook"
-            );
-
-            notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
+            onPaymentSuccess(invoice, tenantId, paymentId);
         }
 
         invoiceRepository.save(invoice);
-        log.info("Webhook processed: paymentId={}, status={}, tenant={}", paymentId, mappedStatus, tenantId);
+        log.info("Webhook processed: paymentId={}, oldStatus={}, newStatus={}, tenant={}",
+                paymentId, oldStatus, mappedStatus, tenantId);
     }
 
     @Transactional(readOnly = true)
@@ -246,6 +228,213 @@ public class PaymentService {
                 "RUB",
                 latest.getCreatedAt()
         );
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentResponse bindCardForTrial(Subscription subscription, String idempotencyKey)
+            throws JsonProcessingException {
+
+        Plan plan = planRepository.findById(subscription.getPlanId())
+                .orElseThrow(() -> new IllegalStateException("Plan not found"));
+
+        Invoice invoice = new Invoice();
+        invoice.setTenantId(subscription.getTenantId());
+        invoice.setSubscriptionId(subscription.getId());
+        invoice.setAmountCents(100L);
+        invoice.setStatus("authorization");
+        invoice.setPaymentMethod(subscription.getPaymentMethod());
+        invoice.setAttemptCount(0);
+        invoice.setCreatedAt(LocalDateTime.now());
+        invoice.setMetadata(objectMapper.valueToTree(Map.of(
+                "purpose", "card_binding_for_trial",
+                "subscriptionId", subscription.getId().toString()
+        )));
+        Invoice savedInvoice = invoiceRepository.save(invoice);
+
+        try {
+            YooKassaPaymentRequest request = new YooKassaPaymentRequest();
+
+            request.setAmount(new YooKassaPaymentRequest.Amount(1L, "RUB"));
+            request.setDescription("Проверка карты для триала: " + plan.getName());
+            request.setCapture(false);
+            request.setSavePaymentMethod(true);
+
+            String returnUrl = environment.getProperty("payment.return-url",
+                    "https://app.com/trial/activated");
+            request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl));
+
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("subscriptionId", subscription.getId().toString());
+            metadata.put("tenantId", subscription.getTenantId());
+            metadata.put("purpose", "card_binding_for_trial");
+            request.setMetadata(metadata);
+
+            YooKassaPaymentResponse response = yooKassaClient.createPayment(request, idempotencyKey);
+
+            if (response.getPaymentMethod() != null && response.getPaymentMethod().getId() != null) {
+                subscription.setPaymentMethodId(response.getPaymentMethod().getId());
+                subscription.setCardBoundAt(LocalDateTime.now());
+                subscription.setAutoRenewalEnabled(true);
+                subscriptionRepository.save(subscription);
+                log.info("Card bound for subscription {}: payment_method_id={}",
+                        subscription.getId(), response.getPaymentMethod().getId());
+            }
+
+            savedInvoice.setPaymentId(response.getId());
+            savedInvoice.setStatus(mapYooKassaStatus(response.getStatus()));
+            invoiceRepository.save(savedInvoice);
+
+            if ("waiting_for_capture".equals(response.getStatus())) {
+                log.info("Canceling authorization payment: {}", response.getId());
+                //String cancelIdempotencyKey = idempotencyKey + "_cancel";
+                yooKassaClient.cancelPayment(response.getId());
+
+                savedInvoice.setStatus("canceled");
+                savedInvoice.setUpdatedAt(LocalDateTime.now());
+                invoiceRepository.save(savedInvoice);
+            }
+
+            return new PaymentResponse(
+                    response.getId(),
+                    "authorization_canceled",
+                    response.getConfirmation() != null ? response.getConfirmation().getConfirmationUrl() : null,
+                    100L,
+                    "RUB",
+                    response.getCreatedAt()
+            );
+
+        } catch (HttpClientErrorException e) {
+            log.error("YooKassa error during card binding", e);
+            savedInvoice.setStatus("failed");
+            invoiceRepository.save(savedInvoice);
+            throw new RuntimeException("Card binding failed: " + e.getResponseBodyAsString(), e);
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PaymentResponse createDeferredPaymentForTrial(Subscription subscription, String idempotencyKey)
+            throws JsonProcessingException {
+
+        Plan plan = planRepository.findById(subscription.getPlanId())
+                .orElseThrow(() -> new IllegalStateException("Plan not found"));
+
+        Invoice invoice = new Invoice();
+        invoice.setTenantId(subscription.getTenantId());
+        invoice.setSubscriptionId(subscription.getId());
+        invoice.setAmountCents(plan.getPriceCents());
+        invoice.setStatus("pending_deferred");
+        invoice.setPaymentMethod(subscription.getPaymentMethod());
+        invoice.setAttemptCount(0);
+        invoice.setCreatedAt(LocalDateTime.now());
+        invoice.setMetadata(objectMapper.valueToTree(Map.of(
+                "purpose", "trial_ending_payment",
+                "source", "notification",
+                "subscriptionId", subscription.getId().toString()
+        )));
+        Invoice savedInvoice = invoiceRepository.save(invoice);
+
+        try {
+            YooKassaPaymentRequest request = buildYooKassaRequest(savedInvoice, subscription, plan);
+
+            request.setPaymentMethodData(new YooKassaPaymentRequest.PaymentMethodData("bank_card"));
+            request.setSavePaymentMethod(true);
+
+            String returnUrl = environment.getProperty("payment.return-url",
+                    "https://app.com/success");
+            request.setConfirmation(new YooKassaPaymentRequest.Confirmation(returnUrl.trim()));
+
+            YooKassaPaymentResponse response = yooKassaClient.createPayment(request, idempotencyKey);
+
+            if (response.getPaymentMethod() != null && response.getPaymentMethod().getId() != null) {
+                subscription.setPaymentMethodId(response.getPaymentMethod().getId());
+                subscription.setCardBoundAt(LocalDateTime.now());
+                subscriptionRepository.save(subscription);
+            }
+
+            String mappedStatus = mapYooKassaStatus(response.getStatus());
+
+            savedInvoice.setPaymentId(response.getId());
+            savedInvoice.setStatus(mappedStatus);
+
+            String confirmationUrl = null;
+            if (response.getConfirmation() != null &&
+                    "redirect".equals(response.getConfirmation().getType())) {
+                confirmationUrl = response.getConfirmation().getConfirmationUrl();
+            }
+            savedInvoice.setConfirmationUrl(confirmationUrl);
+            savedInvoice.setUpdatedAt(LocalDateTime.now());
+            invoiceRepository.save(savedInvoice);
+
+            return new PaymentResponse(
+                    response.getId(),
+                    mappedStatus,
+                    confirmationUrl,
+                    savedInvoice.getAmountCents(),
+                    "RUB",
+                    response.getCreatedAt()
+            );
+
+        } catch (HttpClientErrorException e) {
+            log.error("YooKassa error during deferred payment creation", e);
+            savedInvoice.setStatus("failed");
+            invoiceRepository.save(savedInvoice);
+            throw new RuntimeException("Payment creation failed: " + e.getResponseBodyAsString(), e);
+        } catch (Exception e) {
+            log.error("Unexpected error during deferred payment creation", e);
+            savedInvoice.setStatus("failed");
+            invoiceRepository.save(savedInvoice);
+            throw new RuntimeException("Payment creation failed", e);
+        }
+    }
+
+    private void handleTrialConversionToPaid(Subscription subscription, Plan plan, Invoice invoice) {
+        log.info("Converting trial subscription to paid: subscription={}, invoice={}",
+                subscription.getId(), invoice.getId());
+
+        LocalDate paymentDate = LocalDate.now();
+        subscription.setCurrentPeriodStart(paymentDate);
+
+        LocalDate periodEnd = calculateNextPeriodEnd(paymentDate, plan);
+        if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
+            periodEnd = plan.getEndDate();
+        }
+        subscription.setCurrentPeriodEnd(periodEnd);
+
+        if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
+            subscription.setNextBillingDate(periodEnd.plusDays(1));
+        } else {
+            subscription.setNextBillingDate(null);
+        }
+
+        subscription.setStatus("active");
+        subscription.setTrialEnd(null);
+        subscription.setFailedPaymentAttempts(0);
+        subscription.setPastDueSince(null);
+
+        subscriptionRepository.save(subscription);
+
+        log.info("Trial converted: subscription={}, nextBillingDate={}",
+                subscription.getId(), subscription.getNextBillingDate());
+    }
+
+    private void initializeFirstPaymentPeriods(Subscription subscription, Plan plan) {
+        LocalDate paymentDate = LocalDate.now();
+        subscription.setCurrentPeriodStart(paymentDate);
+
+        LocalDate periodEnd = calculateNextPeriodEnd(paymentDate, plan);
+        if (plan.getEndDate() != null && periodEnd.isAfter(plan.getEndDate())) {
+            periodEnd = plan.getEndDate();
+        }
+        subscription.setCurrentPeriodEnd(periodEnd);
+
+        if (plan.getEndDate() == null || periodEnd.isBefore(plan.getEndDate())) {
+            subscription.setNextBillingDate(periodEnd.plusDays(1));
+        } else {
+            subscription.setNextBillingDate(null);
+        }
+
+        subscription.setStatus("active");
+        subscriptionRepository.save(subscription);
     }
 
     private void handleFailedPayment(Invoice invoice, Subscription subscription) {
@@ -399,5 +588,28 @@ public class PaymentService {
             case "canceled" -> "cancelled";
             default -> yooStatus;
         };
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    private void onPaymentSuccess(Invoice invoice, String tenantId, String paymentId) {
+        Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId()).orElseThrow();
+        Plan plan = planRepository.findById(subscription.getPlanId()).orElseThrow();
+
+        accessService.grantAccess(
+                subscription.getTenantId(),
+                subscription.getCustomerId(),
+                plan.getCode(),
+                subscription.getCurrentPeriodEnd()
+        );
+
+        auditLogService.logPaymentSuccess(
+                tenantId,
+                subscription.getCustomerId().toString(),
+                paymentId,
+                invoice.getAmountCents(),
+                "127.0.0.1",
+                "YooKassa Webhook"
+        );
+        notificationService.sendPaymentSucceededNotification(subscription, invoice, plan);
     }
 }

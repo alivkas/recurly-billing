@@ -2,17 +2,21 @@ package ru.nocode.recurlybilling.services;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.nocode.recurlybilling.components.telegram.TelegramBot;
+import ru.nocode.recurlybilling.data.dto.response.PaymentResponse;
 import ru.nocode.recurlybilling.data.entities.*;
 import ru.nocode.recurlybilling.data.repositories.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -29,6 +33,8 @@ public class NotificationService {
     private final TelegramBot telegramBot;
     private final EncryptionService encryptionService;
     private final StudentAuthService studentAuthService;
+    private final InvoiceRepository invoiceRepository;
+    private final ObjectProvider<PaymentService> paymentServiceProvider;
 
     @Value("${notifications.telegram.enabled:true}")
     private boolean telegramEnabled;
@@ -214,7 +220,7 @@ public class NotificationService {
     }
 
     @Async
-    void sendTelegramNotificationAsync(Notification notification, String message) {
+    public void sendTelegramNotificationAsync(Notification notification, String message) {
         try {
             Long chatId = Long.parseLong(notification.getRecipient());
             boolean sent = telegramBot.sendMessageWithHtml(chatId, message);
@@ -280,14 +286,18 @@ public class NotificationService {
         Long telegramChatId = getCustomerTelegramChatId(subscription.getCustomerId(), tenant.getTenantId());
 
         if (telegramEnabled && telegramChatId != null) {
+            String paymentUrl = getOrCreateTrialPaymentLink(subscription);
+
             String message = String.format("""
             ⏳ <b>Пробный период заканчивается</b>
             
             Здравствуйте, %s!
             
-            Ваш пробный период для курса «%s» заканчивается %s.
+            Ваш пробный период для курса «%s» заканчивается <b>%s</b>.
             
-            Для продолжения доступа к материалам завтра будет списано <b>%s ₽</b>.
+            %s
+            
+            🔗 <a href="%s">💳 Оплатить и продлить доступ</a>
             
             Если вы не хотите продолжать подписку — отмените её до окончания пробного периода.
             
@@ -296,8 +306,9 @@ public class NotificationService {
             """,
                     getCustomerName(subscription.getCustomerId(), tenant.getTenantId()),
                     plan.getName(),
-                    subscription.getTrialEnd(),
-                    plan.getPriceCents() / 100.0,
+                    formatTrialEndDate(subscription.getTrialEnd().atStartOfDay()),
+                    buildPaymentInstructionBlock(subscription),
+                    paymentUrl != null ? paymentUrl : "#",
                     tenant.getName()
             );
 
@@ -311,6 +322,45 @@ public class NotificationService {
             );
 
             sendTelegramNotificationAsync(notification, message);
+
+            log.info("Trial ending notification with payment link sent: subscription={}, url={}",
+                    subscription.getId(), paymentUrl != null);
         }
+    }
+
+    private String getOrCreateTrialPaymentLink(Subscription subscription) {
+        try {
+            Optional<Invoice> existingInvoice = invoiceRepository
+                    .findBySubscriptionIdAndStatus(subscription.getId(), "pending_deferred");
+
+            if (existingInvoice.isPresent() && existingInvoice.get().getConfirmationUrl() != null) {
+                return existingInvoice.get().getConfirmationUrl();
+            }
+
+            String idempotencyKey = "trial_notify_" + subscription.getId() + "_" + System.currentTimeMillis();
+            PaymentResponse payment = paymentServiceProvider.getObject().createDeferredPaymentForTrial(subscription, idempotencyKey);
+
+            return payment.confirmationUrl();
+
+        } catch (Exception e) {
+            log.error("Failed to generate payment link for subscription {}", subscription.getId(), e);
+            return null;
+        }
+    }
+
+    private String buildPaymentInstructionBlock(Subscription subscription) {
+        boolean hasBoundCard = subscription.getPaymentMethodId() != null
+                && !subscription.getPaymentMethodId().isBlank();
+
+        if (hasBoundCard) {
+            return "✅ У вас есть привязанная карта. При оплате вы сможете использовать её или добавить новую.";
+        }
+        return "❗ Для продолжения доступа необходимо добавить способ оплаты.";
+    }
+
+    private String formatTrialEndDate(LocalDateTime trialEnd) {
+        if (trialEnd == null) return "в ближайшее время";
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("d MMMM yyyy 'в' HH:mm", new Locale("ru"));
+        return trialEnd.format(formatter);
     }
 }
