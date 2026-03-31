@@ -1,0 +1,993 @@
+openapi: 3.0.1
+info:
+  title: OpenAPI definition
+  version: v0
+servers:
+- url: http://localhost:8080
+  description: Generated server url
+paths:
+  /api/v1/tenants/onboard:
+    post:
+      tags:
+      - tenant-controller
+      operationId: onboardTenant
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantOnboardingRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+  /api/v1/subscriptions:
+    post:
+      tags:
+      - subscription-controller
+      operationId: createSubscription
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriptionCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+  /api/v1/subscriptions/{subscriptionId}/cancel:
+    post:
+      tags:
+      - subscription-controller
+      operationId: cancelSubscription
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: subscriptionId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriptionCancelRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+  /api/v1/student/my-subscription/cancel:
+    post:
+      tags:
+      - student-subscription-controller
+      operationId: cancelMySubscription
+      parameters:
+      - name: X-Student-Token
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+  /api/v1/student/login:
+    post:
+      tags:
+      - student-auth-controller
+      operationId: login
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+  /api/v1/plans:
+    get:
+      tags:
+      - plan-controller
+      operationId: getAllPlans
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlanResponse"
+    post:
+      tags:
+      - plan-controller
+      operationId: createPlan
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+  /api/v1/payments/webhook:
+    post:
+      tags:
+      - payment-controller
+      operationId: handleYooKassaWebhook
+      parameters:
+      - name: X-Signature
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+        required: true
+      responses:
+        "200":
+          description: OK
+  /api/v1/customers:
+    get:
+      tags:
+      - customer-controller
+      operationId: getAllCustomers
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomerResponse"
+    post:
+      tags:
+      - customer-controller
+      operationId: createCustomer
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerCreateRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+  /api/v1/tenants/payment-settings:
+    patch:
+      tags:
+      - tenant-controller
+      operationId: updatePaymentSettings
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPaymentSettingsRequest"
+        required: true
+      responses:
+        "200":
+          description: OK
+  /test-upcoming:
+    get:
+      tags:
+      - test-controller
+      operationId: testUpcoming
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /test-trial-end:
+    get:
+      tags:
+      - test-controller
+      operationId: testTrialEnd
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /test-notify:
+    get:
+      tags:
+      - test-controller
+      operationId: testNotify
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /test-billing:
+    get:
+      tags:
+      - test-controller
+      operationId: triggerBilling
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /api/v1/tenants/{tenantId}:
+    get:
+      tags:
+      - tenant-controller
+      operationId: getTenant
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+  /api/v1/subscriptions/{subscriptionId}:
+    get:
+      tags:
+      - subscription-controller
+      operationId: getSubscription
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: subscriptionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+  /api/v1/subscriptions/customer/{externalId}:
+    get:
+      tags:
+      - subscription-controller
+      operationId: getSubscriptionsByCustomer
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: externalId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubscriptionResponse"
+  /api/v1/student/my-subscription:
+    get:
+      tags:
+      - student-subscription-controller
+      operationId: getMySubscription
+      parameters:
+      - name: X-Student-Token
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: object
+  /api/v1/plans/{planId}:
+    get:
+      tags:
+      - plan-controller
+      operationId: getPlan
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+  /api/v1/payments/{paymentId}:
+    get:
+      tags:
+      - payment-controller
+      operationId: getPayment
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: paymentId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+  /api/v1/payments/success:
+    get:
+      tags:
+      - payment-controller
+      operationId: success
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
+  /api/v1/customers/{externalId}:
+    get:
+      tags:
+      - customer-controller
+      operationId: getCustomer
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: externalId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+  /api/v1/audit:
+    get:
+      tags:
+      - audit-log-controller
+      operationId: getAuditLogs
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+  /api/v1/audit/user/{externalId}:
+    get:
+      tags:
+      - audit-log-controller
+      operationId: getAuditLogsByUser
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: externalId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+  /api/v1/audit/resource/{resourceType}/{resourceId}:
+    get:
+      tags:
+      - audit-log-controller
+      operationId: getAuditLogsByResource
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: resourceType
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: resourceId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+  /api/v1/analytics:
+    get:
+      tags:
+      - analytics-controller
+      operationId: getAnalytics
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AnalyticsResponse"
+  /api/v1/access/check:
+    get:
+      tags:
+      - access-controller
+      operationId: checkAccess
+      parameters:
+      - name: X-Tenant-ID
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: studentId
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: planCode
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AccessCheckResponse"
+components:
+  schemas:
+    TenantOnboardingRequest:
+      required:
+      - contactEmail
+      - organizationName
+      type: object
+      properties:
+        organizationName:
+          maxLength: 255
+          minLength: 0
+          type: string
+        contactEmail:
+          type: string
+    TenantOnboardingResponse:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        apiKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    SubscriptionCreateRequest:
+      required:
+      - customerId
+      - planId
+      type: object
+      properties:
+        customerId:
+          type: string
+        planId:
+          type: string
+        startDate:
+          type: string
+          format: date
+        paymentMethod:
+          pattern: bank_card|sbp|mir|apple_pay|google_pay
+          type: string
+        withAutoRenewal:
+          type: boolean
+    SubscriptionCancelRequest:
+      type: object
+      properties:
+        cancelImmediately:
+          type: boolean
+    SubscriptionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        currentPeriodStart:
+          type: string
+          format: date
+        currentPeriodEnd:
+          type: string
+          format: date
+        nextBillingDate:
+          type: string
+          format: date
+        metadata:
+          type: object
+          additionalProperties:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+    CancelRequest:
+      type: object
+      properties:
+        cancelImmediately:
+          type: boolean
+    LoginRequest:
+      type: object
+      properties:
+        tenantId:
+          type: string
+        studentExternalId:
+          type: string
+        code:
+          type: string
+    PlanCreateRequest:
+      required:
+      - code
+      - currency
+      - interval
+      - intervalCount
+      - name
+      - priceCents
+      - trialDays
+      type: object
+      properties:
+        code:
+          maxLength: 100
+          minLength: 0
+          type: string
+        name:
+          maxLength: 255
+          minLength: 0
+          type: string
+        priceCents:
+          minimum: 0
+          type: integer
+          format: int64
+        currency:
+          pattern: RUB|USD|EUR
+          type: string
+        interval:
+          pattern: month|semester|year|custom
+          type: string
+        intervalCount:
+          minimum: 1
+          type: integer
+          format: int32
+        trialDays:
+          minimum: 0
+          type: integer
+          format: int32
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        metadata:
+          type: object
+          additionalProperties:
+            type: object
+    PlanResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        priceCents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        interval:
+          type: string
+        intervalCount:
+          type: integer
+          format: int32
+        trialDays:
+          type: integer
+          format: int32
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        metadata:
+          type: object
+          additionalProperties:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+    CustomerCreateRequest:
+      required:
+      - email
+      - externalId
+      - fullName
+      - isStudent
+      type: object
+      properties:
+        externalId:
+          maxLength: 255
+          minLength: 0
+          type: string
+        email:
+          type: string
+        fullName:
+          maxLength: 255
+          minLength: 0
+          type: string
+        phone:
+          pattern: "^\\+7\\d{10}$"
+          type: string
+        isStudent:
+          type: boolean
+        telegramUsername:
+          pattern: "^[a-zA-Z0-9_]{5,32}$"
+          type: string
+    CustomerResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        isStudent:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    TenantPaymentSettingsRequest:
+      required:
+      - yookassaSecretKey
+      - yookassaShopId
+      type: object
+      properties:
+        yookassaShopId:
+          pattern: \d+
+          type: string
+        yookassaSecretKey:
+          pattern: "^(live|test)_[a-zA-Z0-9\\-_]{32,}$"
+          type: string
+    PaymentResponse:
+      type: object
+      properties:
+        paymentId:
+          type: string
+        status:
+          type: string
+        confirmationUrl:
+          type: string
+        amountCents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AuditLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        userId:
+          type: string
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        oldValues:
+          type: object
+          additionalProperties:
+            type: object
+        newValues:
+          type: object
+          additionalProperties:
+            type: object
+        ipAddress:
+          type: string
+        userAgent:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AnalyticsResponse:
+      type: object
+      properties:
+        mrr:
+          type: number
+        activeSubscriptions:
+          type: integer
+          format: int64
+        totalCustomers:
+          type: integer
+          format: int64
+        churnRate:
+          type: number
+        subscriptionsByPlan:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        revenueByMonth:
+          type: object
+          additionalProperties:
+            type: number
+        mrrGrowthRate:
+          type: number
+        newSubscriptionsLast30Days:
+          type: integer
+          format: int64
+    AccessCheckResponse:
+      type: object
+      properties:
+        hasAccess:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date
+        status:
+          type: string
+        reason:
+          type: string

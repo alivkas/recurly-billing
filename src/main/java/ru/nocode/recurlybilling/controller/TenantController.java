@@ -20,8 +20,9 @@ public class TenantController {
     private final TenantService tenantService;
 
     /**
-     * Создание нового tenant'а (онбординг)
-     * Публичный эндпоинт — не требует аутентификации
+     * Создание тенанта
+     * @param request запрос на создание
+     * @return тело ответа тенанта
      */
     @PostMapping("/onboard")
     public ResponseEntity<TenantOnboardingResponse> onboardTenant(
@@ -71,6 +72,13 @@ public class TenantController {
         }
     }
 
+    /**
+     * Обновление настроек тенанта
+     * @param tenantId id тенанта
+     * @param apiKey API ключ тенанта
+     * @param request запрос на обновление настроек
+     * @return код статуса
+     */
     @PatchMapping("/payment-settings")
     public ResponseEntity<Void> updatePaymentSettings(
             @RequestHeader("X-Tenant-ID") String tenantId,

@@ -591,7 +591,7 @@ public class PaymentService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    private void onPaymentSuccess(Invoice invoice, String tenantId, String paymentId) {
+    public void onPaymentSuccess(Invoice invoice, String tenantId, String paymentId) {
         Subscription subscription = subscriptionRepository.findById(invoice.getSubscriptionId()).orElseThrow();
         Plan plan = planRepository.findById(subscription.getPlanId()).orElseThrow();
 

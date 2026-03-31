@@ -1,4 +1,4 @@
-package ru.nocode.recurlybilling.services;
+package ru.nocode.recurlybilling.services.tenant;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
