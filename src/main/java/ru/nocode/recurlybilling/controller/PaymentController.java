@@ -1,6 +1,14 @@
 package ru.nocode.recurlybilling.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.ExampleObject;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -10,6 +18,7 @@ import ru.nocode.recurlybilling.components.yoocassa.YooKassaSignatureValidator;
 import ru.nocode.recurlybilling.data.dto.response.PaymentResponse;
 import ru.nocode.recurlybilling.services.PaymentService;
 import ru.nocode.recurlybilling.services.TenantService;
+import ru.nocode.recurlybilling.utils.docs.PaymentDocs;
 
 import java.util.Map;
 
@@ -17,6 +26,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/payments")
 @RequiredArgsConstructor
+@Tag(name = "💳 Платежи", description = PaymentDocs.TAG_DESCRIPTION)
 public class PaymentController {
 
     private final PaymentService paymentService;
@@ -25,6 +35,61 @@ public class PaymentController {
     private final org.springframework.core.env.Environment environment;
 
     @PostMapping("/webhook")
+    @Operation(
+            summary = PaymentDocs.WEBHOOK_SUMMARY,
+            description = PaymentDocs.WEBHOOK_DESCRIPTION,
+            tags = {"💳 Платежи"},
+            security = {}
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "✅ Вебхук принят и обработан",
+                    content = @Content(examples = @ExampleObject(value = ""))
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "❌ Ошибка парсинга или обработки вебхука",
+                    content = @Content(examples = @ExampleObject(
+                            value = """
+                    {
+                      "timestamp": "2026-03-31T22:27:38Z",
+                      "status": 400,
+                      "error": "Bad Request",
+                      "message": "Invalid webhook payload format"
+                    }
+                    """
+                    ))
+            ),
+            @ApiResponse(
+                    responseCode = "403",
+                    description = "🚫 Неверная подпись X-Signature",
+                    content = @Content(examples = @ExampleObject(
+                            value = """
+                    {
+                      "timestamp": "2026-03-31T22:27:38Z",
+                      "status": 403,
+                      "error": "Forbidden",
+                      "message": "Invalid webhook signature"
+                    }
+                    """
+                    ))
+            ),
+            @ApiResponse(
+                    responseCode = "500",
+                    description = "💥 Ошибка конфигурации или сервера",
+                    content = @Content(examples = @ExampleObject(
+                            value = """
+                    {
+                      "timestamp": "2026-03-31T22:27:38Z",
+                      "status": 500,
+                      "error": "Internal Server Error",
+                      "message": "YooKassa secret key not configured"
+                    }
+                    """
+                    ))
+            )
+    })
     public ResponseEntity<Void> handleYooKassaWebhook(
             @RequestHeader(value = "X-Signature", required = false) String signature,
             @RequestBody String requestBody) {
@@ -71,6 +136,23 @@ public class PaymentController {
     }
 
     @GetMapping("/{paymentId}")
+    @Operation(
+            summary = PaymentDocs.GET_SUMMARY,
+            description = PaymentDocs.GET_DESCRIPTION,
+            tags = {"💳 Платежи"},
+            security = { @SecurityRequirement(name = "TenantAuth") }
+    )
+    @ApiResponses(value = {
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "✅ Данные платежа получены",
+                    content = @Content(schema = @Schema(implementation = PaymentResponse.class))
+            ),
+            @ApiResponse(responseCode = "401", description = "🔐 Неверные учётные данные тенанта"),
+            @ApiResponse(responseCode = "403", description = "🚫 Платёж не принадлежит этому тенанту"),
+            @ApiResponse(responseCode = "404", description = "❌ Платёж не найден"),
+            @ApiResponse(responseCode = "500", description = "💥 Ошибка сервера")
+    })
     public ResponseEntity<PaymentResponse> getPayment(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestHeader("X-API-Key") String apiKey,
@@ -95,6 +177,13 @@ public class PaymentController {
     }
 
     @GetMapping("/success")
+    @Operation(
+            summary = PaymentDocs.SUCCESS_SUMMARY,
+            description = PaymentDocs.SUCCESS_DESCRIPTION,
+            tags = {"💳 Платежи"},
+            security = {}
+    )
+    @ApiResponse(responseCode = "200", description = "✅ Простая страница подтверждения")
     public String success() {
         return "Оплата успешна!";
     }

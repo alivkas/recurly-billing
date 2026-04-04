@@ -53,8 +53,16 @@ public class TenantLifeCycleService {
 
         return new TenantOnboardingResponse(
                 saved.getTenantId(),
+                saved.getName(),
                 apiKey,
-                saved.getCreatedAt());
+                saved.getIsActive() ? "ACTIVE" : "SUSPENDED",
+                saved.getCreatedAt(),
+                new TenantOnboardingResponse.PaymentSettingsInfo(
+                        "YOOKASSA",
+                        saved.getYooKassaShopId() != null,
+                        "RUB"
+                )
+        );
     }
 
     /**
@@ -66,6 +74,12 @@ public class TenantLifeCycleService {
         Tenant tenant = tenantQueryService.findTenantById(tenantId);
         String dummyApiKey = "sk_live_********"; //TODO логика восстановления
 
-        return new TenantOnboardingResponse(tenantId, dummyApiKey, tenant.getCreatedAt());
+        return new TenantOnboardingResponse(
+                tenantId,
+                dummyApiKey,
+                null,
+                null,
+                null,
+                null);
     }
 }

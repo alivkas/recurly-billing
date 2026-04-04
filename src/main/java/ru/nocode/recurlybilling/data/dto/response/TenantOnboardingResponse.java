@@ -11,7 +11,21 @@ import java.time.LocalDateTime;
 @Setter
 @AllArgsConstructor
 public class TenantOnboardingResponse {
+
     private String tenantId;
+    private String organizationName;
     private String apiKey;
+    private String status;
     private LocalDateTime createdAt;
+    private PaymentSettingsInfo paymentSettings;
+
+    @Getter
+    @Setter
+    @AllArgsConstructor
+    public static class PaymentSettingsInfo {
+
+        private String provider;
+        private boolean shopConfigured;
+        private String currency;
+    }
 }

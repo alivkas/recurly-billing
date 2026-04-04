@@ -1,15 +1,343 @@
 openapi: 3.0.1
 info:
-  title: OpenAPI definition
-  version: v0
+  title: Recurly Billing API
+  description: |
+    API для управления рекуррентными платежами в образовательных проектах.
+
+    **Особенности:**
+    - Поддержка российских платежных систем (ЮKassa, CloudPayments)
+    - Соответствие ФЗ-152 о персональных данных
+    - Многоарендная архитектура (multi-tenant)
+    - Вебхуки для уведомления о событиях платежей
+  version: "1.0"
 servers:
-- url: http://localhost:8080
-  description: Generated server url
+  - url: http://localhost:8080
+    description: Generated server url
+security:
+  - TenantAuth: []
+tags:
+  - name: 🔄 Подписки
+    description: |
+      Управление подписками клиентов на рекуррентные платежи.
+      
+      **Что такое подписка?**
+      
+      Подписка — это договорённость о периодическом списании средств
+      с карты клиента в пользу организации (тенанта). Используется для:
+      - Оплаты доступа к образовательным курсам
+      - Ежемесячных членских взносов
+      - Автоматического продления лицензий
+      
+      **Жизненный цикл подписки:**
+      ```
+      created → trialing → active → (renewed × N) → canceled/expired
+      ```
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ (выдаётся при регистрации)
+  - name: 💰 Тарифные планы
+    description: |
+      Управление тарифными планами для рекуррентных платежей.
+      
+      **Что такое план?**
+      
+      План — это шаблон подписки с фиксированными параметрами:
+      - Сумма и валюта платежа
+      - Интервал списания (ежемесячно, ежегодно и т.д.)
+      - Пробный период (опционально)
+      - Описание и название для отображения клиенту
+      
+      Планы привязаны к тенанту и используются при создании подписок.
+      
+      **Примеры использования:**
+      - «Базовый» — 990 ₽/месяц, без триала
+      - «Премиум» — 2490 ₽/месяц, 7 дней триала
+      - «Годовой» — 9990 ₽/год, скидка 20%
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ
+  - name: 📊 Аналитика
+    description: |
+      Бизнес-аналитика и метрики для организации.
+      
+      **Зачем нужна аналитика?**
+      
+      Эндпоинты аналитики предоставляют агрегированные данные для:
+      - 📈 Отслеживания роста выручки и ключевых метрик бизнеса
+      - 🎯 Принятия решений на основе данных (какие тарифы популярны)
+      - 📊 Подготовки отчётов для руководства или инвесторов
+      - 🔍 Выявления аномалий (падение конверсии, рост отмен)
+      
+      **Что включено в аналитику:**
+      
+      | Раздел | Метрики |
+      |--------|---------|
+      | 💰 Выручка | MRR, ARR, общая сумма платежей, средний чек |
+      | 🔄 Подписки | Активные, новые, отменённые, коэффициент удержания |
+      | 👥 Клиенты | Всего клиентов, новые за период, активные плательщики |
+      | 💳 Платежи | Успешные, неудачные, возвраты, конверсия |
+      | 📅 Динамика | Сравнение с предыдущим периодом (день/неделя/месяц) |
+      
+      **Производительность и кэширование:**
+      
+      - Аналитика вычисляется **асинхронно** и кэшируется на 15 минут
+      - При первом запросе после сброса кэша ответ может формироваться до 10 секунд
+      - Для исторических данных (>90 дней) рекомендуется использовать экспорт в CSV
+      - Тяжёлые запросы можно запускать через вебхук (планируется)
+      
+      **Конфиденциальность:**
+      
+      - Возвращаются только агрегированные данные вашего тенанта
+      - Персональные данные клиентов (имена, контакты) не включаются в метрики
+      - Доступ к аналитике имеют только авторизованные запросы с валидным `X-API-Key`
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ
+  - name: 👥 Клиенты
+    description: |
+      Управление клиентами (плательщиками) организации.
+      
+      **Что такое клиент?**
+      
+      Клиент — это конечный пользователь, который оплачивает подписки
+      в пользу организации (тенанта). Примеры:
+      - Студент, оплачивающий доступ к курсам
+      - Родитель, оплачивающий обучение ребёнка
+      - Сотрудник компании с корпоративной подпиской
+      
+      **Важные особенности:**
+      
+      - Клиенты идентифицируются по **вашему внешнему ID** (`externalId`),
+        а не по внутреннему системному ID. Это позволяет легко связывать
+        данные между вашей системой и платежным шлюзом.
+      
+      - Один `externalId` уникален в рамках одного тенанта, но может
+        повторяться у разных тенантов (мультиарендность).
+      
+      - Данные клиентов обрабатываются в соответствии с **ФЗ-152**
+        «О персональных данных»: контакты шифруются, доступ логируется.
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ
+  - name: 🎓 Подписка студента
+    description: |
+      Управление подпиской из личного кабинета студента.
+      
+      **Зачем нужен этот эндпоинт?**
+      
+      `StudentSubscriptionController` позволяет студенту самостоятельно:
+      - 🔍 Просмотреть свою активную подписку и её параметры
+      - ❌ Отменить подписку (с выбором: немедленно или в конце периода)
+      
+      **Ключевые отличия от админ-эндпоинтов:**
+      
+      | Аспект | Админ-эндпоинты (`/api/v1/subscriptions`) | Студент-эндпоинты (`/api/v1/student`) |
+      |--------|-------------------------------------------|---------------------------------------|
+      | Авторизация | `X-Tenant-ID` + `X-API-Key` | `X-Student-Token` (JWT) |
+      | Область данных | Все клиенты тенанта | Только данные текущего студента |
+      | Действия | Создание, чтение, отмена для любого клиента | Только чтение/отмена своей подписки |
+      | Безопасность | Проверка по API-ключу | Проверка по подписанному JWT |
+      
+      **Безопасность:**
+      
+      - Студент получает доступ **только к своим данным** — нельзя посмотреть подписки других студентов того же тенанта
+      - Токен `X-Student-Token` содержит `tenantId` и `studentExternalId` в claims — дополнительная проверка не требуется
+      - Все действия логируются в аудит-лог с указанием `actor: student:{id}`
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовок:
+      - `X-Student-Token` — JWT-токен, полученный после входа через `/api/v1/student/login`
+      
+      **Не требуются:** `X-Tenant-ID` и `X-API-Key` — они извлекаются из токена.
+  - name: 💳 Платежи
+    description: |
+      Управление платежами и обработка уведомлений от платёжных систем.
+      
+      **Архитектура обработки платежей:**
+      ```
+      Клиент → Ваш фронтенд → Recurly API → YooKassa
+                                    ↓
+      YooKassa → Webhook → /api/v1/payments/webhook → Обновление статуса
+      ```
+      
+      **Типы эндпоинтов:**
+      
+      | Эндпоинт | Авторизация | Назначение |
+      |----------|-------------|------------|
+      | `POST /webhook` | 🔐 Подпись YooKassa (`X-Signature`) | Приём уведомлений от платёжной системы |
+      | `GET /{id}` | 🔑 `X-Tenant-ID` + `X-API-Key` | Получение информации о платеже |
+      | `GET /success` | ❌ Публичный | Страница успешной оплаты (редирект) |
+      
+      **Безопасность вебхуков:**
+      
+      Все запросы от ЮKassa на `/webhook` должны содержать заголовок `X-Signature`.
+      Это HMAC-SHA256 подпись тела запроса, вычисленная с использованием
+      вашего секретного ключа. Система автоматически проверяет подпись
+      и отклоняет неподписанные запросы.
+      
+      **Настройка в ЮKassa:**
+      1. ЛК ЮKassa → Интеграция → Уведомления
+      2. Укажите URL: `https://api.yoursite.com/api/v1/payments/webhook`
+      3. Включите события: `payment.succeeded`, `payment.canceled`, `payment.waiting_for_capture`
+      4. Скопируйте секретный ключ и добавьте в `application.properties`:
+         ```properties
+         yookassa.secret-key=your_secret_key_here
+         ```
+  - name: 🏢 Тенанты
+    description: |
+      Управление организациями в системе рекуррентных платежей.
+      
+      **Авторизация**
+      
+      Защищённые эндпоинты требуют два заголовка:
+      - `X-Tenant-ID` — идентификатор организации
+      - `X-API-Key` — секретный ключ (выдаётся при регистрации)
+  - name: 🔐 Доступ
+    description: |
+      Проверка прав доступа студента к платному контенту.
+      
+      **Зачем нужен этот эндпоинт?**
+      
+      `AccessController` отвечает на вопрос: **«Может ли этот студент смотреть этот курс?»**
+      
+      Типичный сценарий использования:
+      ```
+      Студент открывает урок в LMS
+               ↓
+      LMS вызывает: GET /api/v1/access/check?studentId=...&planCode=...
+               ↓
+      Recurly проверяет: есть ли активная подписка на этот план?
+               ↓
+      Ответ: { "hasAccess": true, "expiresAt": "2026-04-30" }
+               ↓
+      LMS: показывает контент ИЛИ предлагает оформить подписку
+      ```
+      
+      **Ключевые особенности:**
+      
+      - ✅ **Быстрый ответ**: метод оптимизирован для частых вызовов (кэширование, индексы)
+      - ✅ **Идемпотентность**: повторный запрос с теми же параметрами вернёт тот же результат
+      - ✅ **Безопасность**: проверка принадлежности студента к тенанту предотвращает доступ к чужим данным
+      - ✅ **Детальные статусы**: коды `HAS_ACCESS`, `NO_ACTIVE_ACCESS`, `STUDENT_NOT_FOUND` помогают фронтенду показать правильное сообщение
+      
+      **Что проверяется:**
+      
+      1. Валидность заголовков авторизации (`X-Tenant-ID`, `X-API-Key`)
+      2. Принадлежность студента (`studentId`) к указанному тенанту
+      3. Наличие активной подписки на план с указанным `planCode`
+      4. Срок действия доступа (если есть `expiresAt`)
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ
+  - name: 🔍 Аудит
+    description: |
+      Журнал аудита действий в системе.
+      
+      **Зачем нужен аудит?**
+      
+      Аудит-лог фиксирует все значимые события в системе для:
+      - ✅ Соответствия **ФЗ-152** «О персональных данных» (требование о логировании доступа)
+      - 🔍 Расследования инцидентов безопасности и несанкционированного доступа
+      - 🐛 Отладки проблем: кто, когда и что изменил
+      - 📊 Аналитики использования системы администраторами
+      
+      **Что логируется:**
+      | Событие | Пример |
+      |---------|--------|
+      | `tenant.created` | Регистрация новой организации |
+      | `subscription.created` | Оформление подписки клиентом |
+      | `payment.succeeded` | Успешное проведение платежа |
+      | `customer.updated` | Изменение контактных данных |
+      | `api.key_used` | Использование API-ключа |
+      | `auth.failed` | Неудачная попытка авторизации |
+      
+      **Хранение и доступ:**
+      - Логи хранятся **отдельно от основных данных** (таблица `audit_log`)
+      - Доступ к логам имеют только авторизованные запросы с валидным `X-API-Key`
+      - Чувствительные данные (пароли, полные номера карт) **не записываются** в лог
+      - Срок хранения: настраивается политикой тенанта (по умолчанию 3 года)
+      
+      **Авторизация**
+      
+      Все запросы требуют заголовки:
+      - `X-Tenant-ID` — идентификатор вашей организации
+      - `X-API-Key` — секретный ключ
+  - name: 🔑 Аутентификация
+    description: |
+      Аутентификация студентов по одноразовому коду.
+      
+      **Зачем нужен этот эндпоинт?**
+      
+      `StudentAuthController` реализует безопасный вход студента в систему
+      без использования пароля — через **одноразовый код подтверждения**.
+      
+      Типичный сценарий:
+      ```
+      1. Студент вводит email/телефон в форме входа
+      2. Система отправляет код (6 цифр) через смс или письмо
+      3. Студент вводит код → вызывает POST /api/v1/student/login
+      4. При успехе получает JWT-токен для последующих запросов
+      5. Токен используется в заголовке Authorization для доступа к контенту
+      ```
+      
+      **Преимущества подхода:**
+      
+      - 🔐 **Без паролей**: нет риска утечки, не нужно хранить хеши
+      - ⏱ **Временные коды**: код действует 5-10 минут, затем невалиден
+      - 📱 **Удобство**: студенту не нужно запоминать пароль
+      - 🛡 **Защита от брутфорса**: лимит попыток ввода кода (3-5 раз)
+      
+      **Безопасность:**
+      
+      - Коды хранятся в зашифрованном виде с TTL (автоматическое удаление)
+      - После 3 неудачных попыток — временная блокировка на 15 минут
+      - Токены имеют срок жизни (например, 24 часа) и могут быть отозваны
+      - Все попытки входа логируются в аудит-лог для мониторинга
+      
+      **Важно:**
+      
+      - Этот эндпоинт **публичный** — не требует заголовков `X-Tenant-ID` / `X-API-Key`
+      - `tenantId` передаётся в теле запроса и валидируется вместе с кодом
+      - Ответ содержит только токен — никаких персональных данных студента
 paths:
   /api/v1/tenants/onboard:
     post:
       tags:
-      - tenant-controller
+        - 🏢 Тенанты
+      summary: 📋 Зарегистрировать новую организацию
+      description: |
+        Создаёт новую организацию в системе и выдаёт учётные данные для доступа к API.
+
+        **Когда использовать:**
+        - При подключении новой образовательной платформы к системе платежей
+        - При регистрации нового клиента в вашей системе
+
+        **Что происходит:**
+        1. Валидация входных данных (название, контакты, настройки)
+        2. Генерация уникального `tenantId` и `apiKey`
+        3. Создание записи в базе данных
+        4. Возврат учётных данных для дальнейшей авторизации
+
+        **Важно:**
+        - Метод не требует аутентификации (публичный эндпоинт)
+        - После успешной регистрации сохраните `apiKey` — он не будет показан повторно
+        - Данные обрабатываются в соответствии с ФЗ-152 «О персональных данных»
       operationId: onboardTenant
       requestBody:
         content:
@@ -18,33 +346,110 @@ paths:
               $ref: "#/components/schemas/TenantOnboardingRequest"
         required: true
       responses:
-        "200":
-          description: OK
+        "201":
+          description: ✅ Организация успешно зарегистрирована
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/TenantOnboardingResponse"
+              examples:
+                Успешная регистрация:
+                  description: Успешная регистрация
+                  value:
+                    tenantId: tn_7f8a9b2c3d4e5f6g
+                    organizationName: Онлайн-школа «ПрофИТ»
+                    apiKey: sk_test_XXXXXXXXXXXXXXXXXXXXXXXX
+                    createdAt: 2024-03-31T10:30:00Z
+                    status: ACTIVE
+                    paymentSettings:
+                      provider: YOOKASSA
+                      currency: RUB
+                      recurringEnabled: true
+        "409":
+          description: ⚠️ Организация с таким названием или email уже существует
+          content:
+            '*/*':
+              example:
+                timestamp: 2024-03-31T10:30:00Z
+                status: 409
+                error: Conflict
+                message: Organization with email 'info@profit-school.ru' already exists
+        "400":
+          description: ❌ Ошибка валидации входных данных
+          content:
+            '*/*':
+              examples:
+                Пустое название:
+                  description: Пустое название
+                  value:
+                    timestamp: 2024-03-31T10:30:00Z
+                    status: 400
+                    error: Bad Request
+                    message: "organizationName: не может быть пустым"
+                Неверный формат телефона:
+                  description: Неверный формат телефона
+                  value:
+                    timestamp: 2024-03-31T10:30:00Z
+                    status: 400
+                    error: Bad Request
+                    message: "contactPhone: неверный формат номера телефона"
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              example:
+                timestamp: 2024-03-31T10:30:00Z
+                status: 500
+                error: Internal Server Error
+                message: Произошла непредвиденная ошибка. Попробуйте позже.
   /api/v1/subscriptions:
     post:
       tags:
-      - subscription-controller
+        - 🔄 Подписки
+      summary: 🔄 Создать новую подписку
+      description: |
+        Создаёт подписку для клиента и инициирует первый платёж (если нет пробного периода).
+
+        **Когда использовать:**
+        - Клиент оформил покупку курса с ежемесячной оплатой
+        - Пользователь активировал авто-продление подписки
+        - Администратор вручную создал подписку для ученика
+
+        **Особенности:**
+        - Поддерживается **идемпотентность**: передайте `Idempotency-Key`,
+          чтобы избежать дублирования при повторных запросах
+        - Если у подписки есть пробный период (`trial_days > 0`),
+          первый платёж не создаётся сразу — статус будет `trialing`
+        - При успешном создании платежа возвращается ссылка на подтверждение
+          (для 3-D Secure или редиректа в платёжную систему)
+
+        **Идемпотентность:**
+
+        Заголовок `Idempotency-Key` гарантирует, что повторный запрос
+        с тем же ключом не создаст дубликат подписки или платежа.
+        Если ключ не передан — он генерируется автоматически (но тогда
+        повторный запрос может создать дубликат).
+
+        **Рекомендация:**
+        Всегда генерируйте `Idempotency-Key` на стороне клиента
+        (например, UUID) и сохраняйте его до получения успешного ответа.
       operationId: createSubscription
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: Idempotency-Key
-        in: header
-        required: false
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -52,33 +457,102 @@ paths:
               $ref: "#/components/schemas/SubscriptionCreateRequest"
         required: true
       responses:
-        "200":
-          description: OK
+        "201":
+          description: ✅ Подписка создана (пробный период)
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+              examples:
+                Успех с триалом:
+                  description: Успех с триалом
+                  value:
+                    id: sub_trial_abc123
+                    tenantId: 6546tds
+                    customerId: cust_student_001
+                    planId: plan_basic_monthly
+                    amount: 990.0
+                    currency: RUB
+                    status: trialing
+                    trialEndsAt: 2026-04-07T22:27:38.9909694
+                    currentPeriodStart: 2026-03-31T22:27:38.9909694
+                    currentPeriodEnd: 2026-04-30T22:27:38.9909694
+                    createdAt: 2026-03-31T22:27:38.9909694
+        "403":
+          description: 🚫 Недостаточно прав
           content:
             '*/*':
               schema:
                 type: object
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+          content:
+            '*/*':
+              schema:
+                type: object
+        "400":
+          description: ❌ Ошибка валидации или бизнес-правил
+          content:
+            '*/*':
+              examples:
+                Неверный planId:
+                  description: Неверный planId
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: Plan with ID 'plan_invalid' not found
+                Клиент не найден:
+                  description: Клиент не найден
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: Customer with ID 'cust_unknown' not found
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: object
+      security:
+        - TenantAuth: []
   /api/v1/subscriptions/{subscriptionId}/cancel:
     post:
       tags:
-      - subscription-controller
+        - 🔄 Подписки
+      summary: ❌ Отменить подписку
+      description: |
+        Отменяет активную подписку клиента.
+
+        **Поведение при отмене:**
+        | Сценарий | Результат |
+        |----------|-----------|
+        | Подписка в пробном периоде | Немедленная отмена, списаний не будет |
+        | Активная подписка | Доступ сохраняется до конца оплаченного периода |
+        | Уже отменённая подписка | Ошибка 400 (Bad Request) |
+
+        **Важно:**
+        - Отмена не возвращает уже списанные средства
+        - Клиент получит уведомление об отмене (если настроено)
+        - Подписку можно восстановить до окончания периода доступа
       operationId: cancelSubscription
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: subscriptionId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: subscriptionId
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -86,23 +560,103 @@ paths:
               $ref: "#/components/schemas/SubscriptionCancelRequest"
         required: true
       responses:
-        "200":
-          description: OK
+        "403":
+          description: 🚫 Недостаточно прав
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/SubscriptionResponse"
+        "404":
+          description: ❌ Подписка не найдена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "400":
+          description: "❌ Нельзя отменить: уже отменена или неверные параметры"
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "200":
+          description: ✅ Подписка отменена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+      security:
+        - TenantAuth: []
   /api/v1/student/my-subscription/cancel:
     post:
       tags:
-      - student-subscription-controller
+        - 🎓 Подписка студента
+      summary: ❌ Отменить свою подписку
+      description: |
+        Позволяет студенту отменить свою активную подписку.
+
+        **Режимы отмены:**
+
+        | Параметр `cancelImmediately` | Поведение |
+        |------------------------------|-----------|
+        | `false` (по умолчанию) | Подписка остаётся активной до конца оплаченного периода. Доступ сохраняется, авто-продление отключается. |
+        | `true` | Подписка отменяется немедленно. Доступ к платному контенту закрывается сразу. Возврат средств не производится (настраивается). |
+
+        **Когда использовать каждый режим:**
+
+        🔹 **`cancelImmediately: false`** (рекомендуется по умолчанию)
+        - Студент передумал продолжать подписку, но хочет допользоваться оплаченным периодом
+        - Типичный сценарий: «Отменить авто-продление»
+
+        🔹 **`cancelImmediately: true`**
+        - Студент хочет немедленно прекратить доступ (например, при утечке аккаунта)
+        - Требует явного подтверждения в интерфейсе: «Вы уверены? Доступ будет закрыт сразу»
+
+        **Что происходит после отмены:**
+
+        1. Статус подписки меняется на `canceled`
+        2. Если `cancelImmediately = true` — доступ к контенту отзывается (через аудит-событие)
+        3. Студент получает уведомление об отмене (если настроено)
+        4. В аналитике фиксируется `churn` с причиной `customer_request`
+
+        **Важно:**
+
+        - Отмена **не возвращает деньги** — для возвратов используйте админ-эндпоинт или обратитесь в поддержку
+        - После отмены студент может оформить новую подписку в любой момент
+        - История подписки сохраняется для отчётности и аналитики
+
+        **Пример сценария в интерфейсе:**
+
+        ```
+        [Личный кабинет] → [Моя подписка] → [Отменить подписку]
+
+        ⚠️ Подтверждение отмены
+
+        Вы отменяете подписку «Премиум-доступ».
+
+        ○ Оставить доступ до 31 марта 2026 (рекомендуется)
+        ● Закрыть доступ немедленно
+
+        [Отменить подписку] [Назад]
+        ```
       operationId: cancelMySubscription
       parameters:
-      - name: X-Student-Token
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Student-Token
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -110,8 +664,29 @@ paths:
               $ref: "#/components/schemas/CancelRequest"
         required: true
       responses:
+        "400":
+          description: "❌ Нельзя отменить: нет активной подписки"
+          content:
+            '*/*':
+              example:
+                error: No active subscription found
         "200":
-          description: OK
+          description: ✅ Подписка отменена
+          content:
+            '*/*':
+              examples:
+                Успешная отмена:
+                  description: Успешная отмена
+                  value:
+                    message: Subscription cancelled successfully
+        "401":
+          description: 🔐 Неверный токен
+          content:
+            '*/*':
+              example:
+                error: Invalid token
+        "500":
+          description: 💥 Ошибка сервера
           content:
             '*/*':
               schema:
@@ -119,7 +694,60 @@ paths:
   /api/v1/student/login:
     post:
       tags:
-      - student-auth-controller
+        - 🔑 Аутентификация
+      summary: 🔑 Войти по одноразовому коду
+      description: |
+        Аутентифицирует студента и выдаёт токен доступа.
+
+        **Параметры запроса:**
+
+        | Поле | Тип | Описание | Пример |
+        |------|-----|----------|--------|
+        | `tenantId` | String | ID организации (из вашей системы) | `6546tds` |
+        | `studentExternalId` | String | Внешний ID студента (из LMS) | `student_ivan_2024` |
+        | `code` | String | Одноразовый код подтверждения | `847291` |
+
+        **Как работает проверка:**
+
+        1. Система ищет активный код для комбинации `tenantId + studentExternalId`
+        2. Сравнивает переданный код с хешем в базе (не в открытом виде!)
+        3. Проверяет, не истёк ли срок действия кода (обычно 5-10 минут)
+        4. При успехе генерирует JWT-токен с claims: `sub`, `tenant`, `exp`
+        5. Возвращает токен клиенту для использования в `Authorization: Bearer ...`
+
+        **Формат токена (JWT):**
+        ```json
+        {
+          "sub": "student_ivan_2024",
+          "tenant": "6546tds",
+          "iat": 1711922858,
+          "exp": 1712009258,
+          "scope": "student:read student:content"
+        }
+        ```
+
+        **Использование токена:**
+        ```http
+        GET /api/v1/access/check?studentId=student_ivan_2024&planCode=premium
+        Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        ```
+
+        **Обработка ошибок:**
+
+        | Ошибка | Когда возникает | Что делать |
+        |--------|----------------|------------|
+        | `INVALID_CODE` | Код не совпадает с выданным | Предложить ввести код заново |
+        | `CODE_EXPIRED` | Код истёк (>10 минут) | Отправить новый код |
+        | `TOO_MANY_ATTEMPTS` | Превышен лимит попыток | Подождать 15 минут или запросить новый код |
+        | `STUDENT_NOT_FOUND` | Студент не найден в тенанте | Проверить корректность studentExternalId |
+        | `TENANT_NOT_FOUND` | Неверный tenantId | Проверить настройки интеграции |
+
+        **Рекомендации для фронтенда:**
+
+        - Показывайте таймер обратного отсчёта действия кода
+        - Добавьте кнопку «Отправить код повторно» с задержкой 60 секунд
+        - После успешного входа сохраняйте токен в `localStorage` или `HttpOnly cookie`
+        - Реализуйте автоматическое обновление токена перед истечением (refresh token)
       operationId: login
       requestBody:
         content:
@@ -128,54 +756,155 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
         required: true
       responses:
+        "404":
+          description: ❌ Студент или тенант не найден
+          content:
+            '*/*':
+              example:
+                error: "STUDENT_NOT_FOUND: Student with ID 'student_unknown' not found\
+                  \ in tenant"
         "200":
-          description: OK
+          description: ✅ Аутентификация успешна
+          content:
+            '*/*':
+              examples:
+                Успешный вход:
+                  description: Успешный вход
+                  value:
+                    token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdHVkZW50X2l2YW5fMjAyNCIsInRlbmFudCI6IjY1NDZ0ZHMiLCJpYXQiOjE3MTE5MjI4NTgsImV4cCI6MTcxMjAwOTI1OH0.abc123def456
+        "400":
+          description: ❌ Ошибка валидации или неверный код
           content:
             '*/*':
               schema:
-                type: object
-                additionalProperties:
-                  type: string
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                Неверный код:
+                  description: Неверный код
+                  value:
+                    error: "INVALID_CODE: Код не совпадает с выданным"
+                Код истёк:
+                  description: Код истёк
+                  value:
+                    error: "CODE_EXPIRED: Срок действия кода истёк. Запросите новы\
+                      й."
+                Слишком много попыток:
+                  description: Слишком много попыток
+                  value:
+                    error: "TOO_MANY_ATTEMPTS: Превышен лимит попыток. Повторите ч\
+                      ерез 15 минут."
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              example:
+                error: Internal server error
   /api/v1/plans:
     get:
       tags:
-      - plan-controller
+        - 💰 Тарифные планы
+      summary: 📋 Получить все тарифные планы
+      description: |
+        Возвращает список всех тарифных планов организации.
+
+        **Фильтрация (планируется):**
+        В будущих версиях поддерживаются параметры:
+        - `?active=true` — только активные планы
+        - `?interval=month` — по периоду списания
+        - `?search=premium` — поиск по названию/описанию
+
+        **Сортировка:**
+        По умолчанию планы возвращаются в порядке создания (новые первыми).
+
+        **Пагинация:**
+        При большом количестве планов используйте:
+        - `?limit=20` — количество записей на странице
+        - `?offset=0` — смещение от начала
       operationId: getAllPlans
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
-        "200":
-          description: OK
+        "403":
+          description: 🚫 Доступ запрещён
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/PlanResponse"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlanResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlanResponse"
+        "200":
+          description: ✅ Список планов получен
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+      security:
+        - TenantAuth: []
     post:
       tags:
-      - plan-controller
+        - 💰 Тарифные планы
+      summary: 💰 Создать тарифный план
+      description: |
+        Создаёт новый тарифный план для организации.
+
+        **Когда использовать:**
+        - Настройка новых тарифов в личном кабинете администратора
+        - Программное создание планов при импорте из внешней системы
+        - A/B-тестирование: создание вариантов планов с разными параметрами
+
+        **Параметры плана:**
+        | Поле | Описание | Пример |
+        |------|----------|--------|
+        | `code` | Уникальный код плана (для вашей системы) | `premium_monthly` |
+        | `name` | Название для отображения клиенту | «Премиум-доступ» |
+        | `amount` | Сумма платежа в минорной валюте | `149000` (1490.00 ₽) |
+        | `currency` | Код валюты по ISO 4217 | `RUB` |
+        | `interval` | Период списания | `month`, `year` |
+        | `trialDays` | Дней пробного периода | `7` |
+        | `description` | Подробное описание тарифа | «Полный доступ ко всем курсам» |
+
+        **Важно:**
+        - Поле `code` должно быть уникальным в рамках одного тенанта
+        - Сумма указывается в **копейках** (1490.00 ₽ = `149000`)
+        - После создания план можно использовать в `SubscriptionCreateRequest`
+        - Изменение параметров существующего плана не влияет на активные подписки
       operationId: createPlan
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -183,23 +912,127 @@ paths:
               $ref: "#/components/schemas/PlanCreateRequest"
         required: true
       responses:
-        "200":
-          description: OK
+        "403":
+          description: 🚫 Недостаточно прав для создания планов
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/PlanResponse"
+        "400":
+          description: ❌ Ошибка валидации параметров
+          content:
+            '*/*':
+              examples:
+                Дубликат кода плана:
+                  description: Дубликат кода плана
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: Plan with code 'premium_monthly' already exists for this
+                      tenant
+                Неверная валюта:
+                  description: Неверная валюта
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "currency: unsupported value 'EUR'. Supported: RUB, USD,\
+                      \ KZT"
+                Отрицательная сумма:
+                  description: Отрицательная сумма
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "amount: must be greater than 0"
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "201":
+          description: ✅ План успешно создан
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+              examples:
+                Успешное создание:
+                  description: Успешное создание
+                  value:
+                    id: plan_premium_monthly_2026
+                    tenantId: 6546tds
+                    code: premium_monthly
+                    name: Премиум-доступ
+                    amount: 149000
+                    currency: RUB
+                    interval: month
+                    intervalCount: 1
+                    trialDays: 7
+                    description: Полный доступ ко всем курсам и материалам
+                    isActive: true
+                    createdAt: 2026-03-31T22:27:38.9909694
+                    updatedAt: 2026-03-31T22:27:38.9909694
+      security:
+        - TenantAuth: []
   /api/v1/payments/webhook:
     post:
       tags:
-      - payment-controller
+        - 💳 Платежи
+      summary: 🔔 Обработать уведомление от YooKassa
+      description: |
+        **Публичный эндпоинт** для приёма вебхуков от платёжной системы ЮKassa.
+
+        **Как это работает:**
+        1. ЮKassa отправляет POST-запрос с данными о событии платежа
+        2. Заголовок `X-Signature` содержит HMAC-подпись для верификации
+        3. Система проверяет подпись по секретному ключу
+        4. Извлекает `shop_id` → находит соответствующий `tenant_id`
+        5. Обновляет статус платежа и подписки в базе данных
+        6. Возвращает `200 OK` (ЮKassa повторит запрос при ошибке)
+
+        **Поддерживаемые события:**
+        | Событие | Описание | Действие системы |
+        |---------|----------|-----------------|
+        | `payment.succeeded` | Платёж успешно проведён | Активация подписки, отправка чека |
+        | `payment.canceled` | Платёж отменён | Обновление статуса подписки на `past_due` |
+        | `payment.waiting_for_capture` | Требуется подтверждение | Ожидание ручного подтверждения (если настроено) |
+        | `payment.refunded` | Возврат средств | Обновление истории платежей |
+
+        **Формат запроса от ЮKassa:**
+        ```json
+        {
+          "event": "payment.succeeded",
+          "object": {
+            "id": "payment_123456",
+            "status": "succeeded",
+            "amount": { "value": "1490.00", "currency": "RUB" },
+            "recipient": { "account_id": "123456" },
+            "metadata": { "subscription_id": "sub_abc123", "tenant_id": "6546tds" }
+          }
+        }
+        ```
+
+        **Важно:**
+        - Эндпоинт **не требует** заголовков `X-Tenant-ID` / `X-API-Key`
+        - Проверка осуществляется через криптографическую подпись
+        - Ответ `200 OK` обязателен — иначе ЮKасса повторит запрос до 24 часов
+        - Обработка должна быть идемпотентной (повторный вебхук не создаст дубликат)
       operationId: handleYooKassaWebhook
       parameters:
-      - name: X-Signature
-        in: header
-        required: false
-        schema:
-          type: string
+        - name: X-Signature
+          in: header
+          required: false
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -207,48 +1040,148 @@ paths:
               type: string
         required: true
       responses:
+        "403":
+          description: 🚫 Неверная подпись X-Signature
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 403
+                error: Forbidden
+                message: Invalid webhook signature
+        "500":
+          description: 💥 Ошибка конфигурации или сервера
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 500
+                error: Internal Server Error
+                message: YooKassa secret key not configured
+        "400":
+          description: ❌ Ошибка парсинга или обработки вебхука
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 400
+                error: Bad Request
+                message: Invalid webhook payload format
         "200":
-          description: OK
+          description: ✅ Вебхук принят и обработан
   /api/v1/customers:
     get:
       tags:
-      - customer-controller
+        - 👥 Клиенты
+      summary: 📋 Получить всех клиентов тенанта
+      description: |
+        Возвращает список всех клиентов, зарегистрированных в организации.
+
+        **Когда использовать:**
+        - Экспорт базы плательщиков для аналитики
+        - Массовая рассылка уведомлений об изменениях тарифов
+        - Синхронизация данных с внешней CRM
+
+        **Пагинация (планируется):**
+        В будущих версиях поддерживаются параметры:
+        - `?limit=50` — количество записей на странице (по умолчанию 20)
+        - `?offset=0` — смещение от начала списка
+        - `?search=ivan` — фильтрация по имени, фамилии или email
+
+        **Производительность:**
+
+        Для тенантов с большим количеством клиентов (>10 000) рекомендуется:
+        - Использовать пагинацию
+        - Кэшировать результаты на стороне клиента
+        - Запрашивать только необходимые поля (через `?fields=id,externalId,email`)
       operationId: getAllCustomers
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
-        "200":
-          description: OK
+        "403":
+          description: 🚫 Доступ запрещён
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/CustomerResponse"
+        "200":
+          description: ✅ Список клиентов получен
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomerResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CustomerResponse"
+      security:
+        - TenantAuth: []
     post:
       tags:
-      - customer-controller
+        - 👥 Клиенты
+      summary: 👤 Создать нового клиента
+      description: |
+        Регистрирует нового клиента в системе для последующего оформления подписок.
+
+        **Когда использовать:**
+        - Пользователь зарегистрировался в вашей платформе и готов к оплате
+        - Импорт базы клиентов из внешней CRM/LMS
+        - Создание клиента администратором вручную
+
+        **Идентификация клиента:**
+
+        Поле `externalId` — это **ваш идентификатор** пользователя в вашей системе.
+        Например:
+        - ID из таблицы `users` вашей базы данных
+        - Уникальный номер из 1С или битрикс24
+        - Хеш email для анонимизации
+
+        **Важно:**
+        - `externalId` должен быть уникальным в рамках одного тенанта
+        - Не передавайте в этом поле чувствительные данные (пароли, токены)
+        - После создания клиент может быть использован в `SubscriptionCreateRequest`
+
+        **Безопасность данных:**
+
+        - Поле `email` шифруется перед сохранением в базе
+        - В ответах API email возвращается в исходном виде только при запросе
+          с валидным `X-API-Key`
+        - Логи не содержат полных контактных данных клиентов
       operationId: createCustomer
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -256,28 +1189,109 @@ paths:
               $ref: "#/components/schemas/CustomerCreateRequest"
         required: true
       responses:
-        "200":
-          description: OK
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/CustomerResponse"
+        "201":
+          description: ✅ Клиент успешно создан
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+              examples:
+                Успешное создание:
+                  description: Успешное создание
+                  value:
+                    id: cust_sys_9k8j7h6g5f4d
+                    tenantId: 6546tds
+                    externalId: user_ivan_2024
+                    email: ivan.petrov@example.com
+                    phone: "+79991234567"
+                    firstName: Иван
+                    lastName: Петров
+                    metadata:
+                      lms_user_id: "12345"
+                      course_group: premium
+                    createdAt: 2026-03-31T22:27:38.9909694
+                    updatedAt: 2026-03-31T22:27:38.9909694
+        "403":
+          description: 🚫 Недостаточно прав
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "400":
+          description: ❌ Ошибка валидации данных
+          content:
+            '*/*':
+              examples:
+                Дубликат externalId:
+                  description: Дубликат externalId
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: Customer with externalId 'user_ivan_2024' already exists
+                      for this tenant
+                Неверный формат email:
+                  description: Неверный формат email
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "email: неверный формат адреса электронной почты"
+                Неверный формат телефона:
+                  description: Неверный формат телефона
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "phone: номер должен быть в формате +79991234567"
+      security:
+        - TenantAuth: []
   /api/v1/tenants/payment-settings:
     patch:
       tags:
-      - tenant-controller
+        - 🏢 Тенанты
+      summary: ⚙️ Настроить интеграцию с YooKassa
+      description: |
+        Устанавливает учётные данные для подключения к платёжной системе ЮKassa.
+
+        **Что нужно указать:**
+        | Параметр | Описание | Где найти |
+        |----------|----------|-----------|
+        | `yookassaShopId` | ID магазина в ЮKassa | ЛК ЮKassa → Настройки → Техническая информация |
+        | `yookassaSecretKey` | Секретный ключ | ЛК ЮKassa → Настройки → Ключи для интеграции |
+
+        **Формат ключа:**
+        - Тестовый режим: `test_` + 32+ символов (латиница, цифры, `-`, `_`)
+        - Продакшен: `live_` + 32+ символов
+
+        **Важно:**
+        - Ключ хранится в зашифрованном виде
+        - После установки можно проводить тестовые и реальные платежи
+        - Для смены ключа отправьте новый запрос с обновлёнными данными
       operationId: updatePaymentSettings
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -285,12 +1299,42 @@ paths:
               $ref: "#/components/schemas/TenantPaymentSettingsRequest"
         required: true
       responses:
+        "500":
+          description: 💥 Ошибка при сохранении
         "200":
-          description: OK
+          description: ✅ Настройки сохранены
+        "403":
+          description: 🚫 Недостаточно прав
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+        "404":
+          description: ❌ Организация не найдена
+        "400":
+          description: ❌ Ошибка валидации
+          content:
+            '*/*':
+              examples:
+                Неверный Shop ID:
+                  description: Неверный Shop ID
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "yookassaShopId: Shop ID must contain only digits"
+                Неверный формат ключа:
+                  description: Неверный формат ключа
+                  value:
+                    timestamp: 2026-03-31T22:27:38Z
+                    status: 400
+                    error: Bad Request
+                    message: "yookassaSecretKey: Secret key must be a valid YooKassa\
+                      \ key (starts with 'live_' or 'test_')"
+      security:
+        - TenantAuth: []
   /test-upcoming:
     get:
       tags:
-      - test-controller
+        - test-controller
       operationId: testUpcoming
       responses:
         "200":
@@ -302,7 +1346,7 @@ paths:
   /test-trial-end:
     get:
       tags:
-      - test-controller
+        - test-controller
       operationId: testTrialEnd
       responses:
         "200":
@@ -314,7 +1358,7 @@ paths:
   /test-notify:
     get:
       tags:
-      - test-controller
+        - test-controller
       operationId: testNotify
       responses:
         "200":
@@ -326,7 +1370,7 @@ paths:
   /test-billing:
     get:
       tags:
-      - test-controller
+        - test-controller
       operationId: triggerBilling
       responses:
         "200":
@@ -338,171 +1382,477 @@ paths:
   /api/v1/tenants/{tenantId}:
     get:
       tags:
-      - tenant-controller
+        - 🏢 Тенанты
+      summary: 🔎 Получить данные организации
+      description: |
+        Возвращает информацию о зарегистрированной организации.
+
+        **Требования:**
+        - `X-Tenant-ID` должен совпадать с `tenantId` в пути
+        - `X-API-Key` должен быть валидным ключом организации
       operationId: getTenant
       parameters:
-      - name: tenantId
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
-        "200":
-          description: OK
+        "403":
+          description: 🚫 Tenant ID не совпадает
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/TenantOnboardingResponse"
+        "200":
+          description: ✅ Данные получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+              example:
+                tenantId: 6546tds
+                apiKey: sk_test_XXXXXXXXXXXXXXXXXXXXXXXX
+                createdAt: 2026-03-31T22:27:38.9909694
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+        "404":
+          description: ❌ Организация не найдена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+      security:
+        - TenantAuth: []
   /api/v1/subscriptions/{subscriptionId}:
     get:
       tags:
-      - subscription-controller
+        - 🔄 Подписки
+      summary: 🔎 Получить информацию о подписке
+      description: |
+        Возвращает полные данные подписки по её идентификатору.
+
+        **Что возвращается:**
+        - Основная информация: статус, сумма, валюта, периоды
+        - Данные клиента: `customerId` (ваш внешний идентификатор)
+        - Ссылка на план: `planId` (если используется система тарифов)
+        - История платежей (опционально, через отдельный эндпоинт)
+
+        **Используйте для:**
+        - Отображения статуса подписки в личном кабинете
+        - Проверки даты следующего списания
+        - Диагностики проблем с оплатой
       operationId: getSubscription
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: subscriptionId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: subscriptionId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Данные подписки получены
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/SubscriptionResponse"
+        "403":
+          description: 🚫 Недостаточно прав
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "404":
+          description: ❌ Подписка не найдена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+      security:
+        - TenantAuth: []
   /api/v1/subscriptions/customer/{externalId}:
     get:
       tags:
-      - subscription-controller
+        - 🔄 Подписки
+      summary: 📋 Получить все подписки клиента
+      description: |
+        Возвращает список всех подписок, привязанных к внешнему идентификатору клиента.
+
+        **Когда использовать:**
+        - Показ истории покупок в профиле пользователя
+        - Массовое управление подписками клиента
+        - Аналитика: сколько активных подписок у пользователя
+
+        **Фильтрация:**
+        В будущем планируется поддержка параметров:
+        - `?status=active` — только активные
+        - `?planId=...` — по конкретному тарифу
+        - `?limit=10&offset=0` — пагинация
       operationId: getSubscriptionsByCustomer
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: externalId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: externalId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Список подписок получен
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+        "403":
+          description: 🚫 Недостаточно прав
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/SubscriptionResponse"
-  /api/v1/student/my-subscription:
-    get:
-      tags:
-      - student-subscription-controller
-      operationId: getMySubscription
-      parameters:
-      - name: X-Student-Token
-        in: header
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          description: OK
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
           content:
             '*/*':
               schema:
-                type: object
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubscriptionResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubscriptionResponse"
+      security:
+        - TenantAuth: []
+  /api/v1/student/my-subscription:
+    get:
+      tags:
+        - 🎓 Подписка студента
+      summary: 🔍 Получить свою активную подписку
+      description: |
+        Возвращает информацию о текущей подписке студента.
+
+        **Как определяется «активная» подписка:**
+
+        Метод возвращает подписку по приоритету:
+        1. 🔹 `active` — оплаченная активная подписка (наивысший приоритет)
+        2. 🔸 `trialing` — пробный период (если нет активной)
+        3. ⚪ Любая другая — если нет ни активной, ни триальной (для отображения истории)
+
+        **Когда использовать:**
+
+        - Отображение статуса подписки в личном кабинете студента
+        - Показ даты следующего списания или окончания доступа
+        - Проверка, может ли студент получить доступ к платному контенту
+
+        **Что возвращается:**
+
+        Ответ содержит те же поля, что и `SubscriptionResponse` из админ-эндпоинтов:
+        - `id` — идентификатор подписки
+        - `planId` / `planCode` — тарифный план
+        - `amount`, `currency` — сумма и валюта
+        - `status` — текущий статус (`active`, `trialing`, `canceled`, `expired`)
+        - `currentPeriodEnd` — дата окончания текущего периода
+        - `trialEndsAt` — дата окончания триала (если есть)
+
+        **Пример использования во фронтенде:**
+
+        ```javascript
+        // Загрузка статуса подписки при входе в ЛК
+        async function loadSubscriptionStatus() {
+          const response = await fetch('/api/v1/student/my-subscription', {
+            headers: { 'X-Student-Token': localStorage.getItem('student_token') }
+          });
+
+          if (response.status === 404) {
+            showNoSubscriptionBanner(); // "У вас нет активной подписки"
+            return;
+          }
+
+          const sub = await response.json();
+
+          // Отображаем информацию
+          document.getElementById('plan-name').textContent = sub.planName;
+          document.getElementById('next-billing').textContent =
+            formatDate(sub.currentPeriodEnd);
+
+          // Если есть триал — показываем таймер
+          if (sub.status === 'trialing' && sub.trialEndsAt) {
+            startTrialCountdown(sub.trialEndsAt);
+          }
+        }
+        ```
+      operationId: getMySubscription
+      parameters:
+        - name: X-Student-Token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "401":
+          description: 🔐 Неверный или истёкший токен
+          content:
+            '*/*':
+              example:
+                error: Invalid token
+        "404":
+          description: ❌ У студента нет подписок
+        "200":
+          description: ✅ Данные подписки получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
+              examples:
+                Активная подписка:
+                  description: Активная подписка
+                  value:
+                    id: sub_9k8j7h6g5f4d3s2a
+                    tenantId: 6546tds
+                    customerId: student_ivan_2024
+                    planId: plan_premium_monthly
+                    planCode: premium_monthly
+                    planName: Премиум-доступ
+                    amount: 149000
+                    currency: RUB
+                    status: active
+                    trialEndsAt: null
+                    currentPeriodStart: 2026-03-01T00:00:00Z
+                    currentPeriodEnd: 2026-03-31T23:59:59Z
+                    createdAt: 2026-02-15T10:30:00Z
+                    updatedAt: 2026-03-01T00:00:01Z
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              example:
+                error: Internal server error
   /api/v1/plans/{planId}:
     get:
       tags:
-      - plan-controller
+        - 💰 Тарифные планы
+      summary: 🔎 Получить тарифный план
+      description: |
+        Возвращает полную информацию о тарифном плане по его идентификатору.
+
+        **Используйте для:**
+        - Отображения деталей тарифа в интерфейсе
+        - Проверки параметров перед созданием подписки
+        - Аудита: какие планы настроены в организации
+
+        **Идентификатор плана:**
+        - Можно использовать системный `id` (например, `plan_abc123`)
+        - Или ваш уникальный `code` (например, `premium_monthly`)
       operationId: getPlan
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: planId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Данные плана получены
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/PlanResponse"
+        "404":
+          description: ❌ План не найден
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "403":
+          description: 🚫 Доступ запрещён
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+      security:
+        - TenantAuth: []
   /api/v1/payments/{paymentId}:
     get:
       tags:
-      - payment-controller
+        - 💳 Платежи
+      summary: 🔎 Получить информацию о платеже
+      description: |
+        Возвращает детальную информацию о платеже по его идентификатору.
+
+        **Когда использовать:**
+        - Отображение истории платежей в личном кабинете клиента
+        - Диагностика проблем с оплатой (почему не активировалась подписка)
+        - Сверка данных с платёжной системой при поддержке
+
+        **Идентификатор платежа:**
+        - Может быть как системным (`pay_abc123`), так и ID из ЮKassa (`payment_123456`)
+        - Система автоматически определяет тип и ищет в соответствующей таблице
+
+        **Что возвращается:**
+        - Статус платежа и дата изменения
+        - Сумма, валюта, способ оплаты
+        - Связанные сущности: подписка, клиент, тенант
+        - Ссылка на чек (если сформирован через онлайн-кассу)
       operationId: getPayment
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: paymentId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
-        "200":
-          description: OK
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/PaymentResponse"
+        "404":
+          description: ❌ Платёж не найден
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "403":
+          description: 🚫 Платёж не принадлежит этому тенанту
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+        "200":
+          description: ✅ Данные платежа получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+      security:
+        - TenantAuth: []
   /api/v1/payments/success:
     get:
       tags:
-      - payment-controller
+        - 💳 Платежи
+      summary: ✅ Страница успешной оплаты
+      description: |
+        Простая страница для редиректа после успешной оплаты.
+
+        **Настройка в ЮKassa:**
+        В настройках магазина укажите:
+        ```
+        Return URL: https://yoursite.com/api/v1/payments/success
+        ```
+
+        После подтверждения платежа ЮKassa перенаправит клиента на этот адрес.
+
+        **Для продакшена:**
+        Рекомендуется заменить этот эндпоинт на редирект в ваш фронтенд:
+        ```java
+        @GetMapping("/success")
+        public ResponseEntity<Void> success(@RequestParam String paymentId) {
+            return ResponseEntity
+                .status(HttpStatus.FOUND)
+                .location(URI.create("https://app.yoursite.com/payment/success?id=" + paymentId))
+                .build();
+        }
+        ```
       operationId: success
       responses:
         "200":
-          description: OK
+          description: ✅ Простая страница подтверждения
           content:
             '*/*':
               schema:
@@ -510,183 +1860,636 @@ paths:
   /api/v1/customers/{externalId}:
     get:
       tags:
-      - customer-controller
+        - 👥 Клиенты
+      summary: 🔎 Получить данные клиента
+      description: |
+        Возвращает полную информацию о клиенте по его внешнему идентификатору.
+
+        **Используйте для:**
+        - Отображения профиля плательщика в личном кабинете
+        - Проверки контактных данных перед отправкой чека
+        - Привязки истории платежей к пользователю в вашей системе
+
+        **Поиск по `externalId`:**
+
+        Система ищет клиента по комбинации:
+        ```
+        WHERE tenant_id = ? AND external_id = ?
+        ```
+
+        Это гарантирует, что вы не получите данные клиента из другой организации.
       operationId: getCustomer
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: externalId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: externalId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Данные клиента получены
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/CustomerResponse"
+        "404":
+          description: ❌ Клиент не найден
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "403":
+          description: 🚫 Доступ запрещён
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+      security:
+        - TenantAuth: []
   /api/v1/audit:
     get:
       tags:
-      - audit-log-controller
+        - 🔍 Аудит
+      summary: 📋 Получить все логи аудита
+      description: |
+        Возвращает список всех событий аудита для организации.
+
+        **Когда использовать:**
+        - Ежемесячный отчёт для соответствия требованиям регуляторов
+        - Расследование инцидента: «кто удалил подписку клиента?»
+        - Мониторинг подозрительной активности (много неудачных авторизаций)
+
+        **Фильтрация (планируется):**
+        В будущих версиях поддерживаются параметры:
+        - `?eventType=payment.succeeded` — только определённый тип событий
+        - `?startDate=2026-01-01&endDate=2026-03-31` — диапазон дат
+        - `?severity=INFO,WARN,ERROR` — по уровню важности
+        - `?search=ivan` — поиск по пользователю или ресурсу
+
+        **Пагинация:**
+
+        Поскольку количество записей может быть большим, рекомендуется:
+        - Использовать `?limit=100&offset=0` для постраничной навигации
+        - Кэшировать результаты на стороне клиента при частых запросах
+        - Экспортировать данные в CSV/JSON для офлайн-анализа
       operationId: getAuditLogs
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Список логов получен
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuditLogEntry"
+        "403":
+          description: 🚫 Доступ запрещён
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+      security:
+        - TenantAuth: []
   /api/v1/audit/user/{externalId}:
     get:
       tags:
-      - audit-log-controller
+        - 🔍 Аудит
+      summary: 👤 Получить логи по пользователю
+      description: |
+        Возвращает все события, связанные с конкретным пользователем.
+
+        **Идентификация пользователя:**
+
+        Поиск осуществляется по `externalId` — вашему идентификатору
+        пользователя в системе (тому же, что используется в `CustomerController`).
+
+        **Примеры использования:**
+        - «Показать историю действий студента Иванова»
+        - «Проверить, кто изменял настройки этого клиента»
+        - «Найти все платежи, инициированные этим пользователем»
+
+        **Конфиденциальность:**
+
+        Запрос возвращает логи только в рамках вашего тенанта.
+        Вы не можете получить логи пользователя из другой организации,
+        даже если знаете его `externalId`.
       operationId: getAuditLogsByUser
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: externalId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: externalId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Логи пользователя получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuditLogEntry"
+        "404":
+          description: ❌ Пользователь не найден
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+        "403":
+          description: 🚫 Доступ запрещён
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+      security:
+        - TenantAuth: []
   /api/v1/audit/resource/{resourceType}/{resourceId}:
     get:
       tags:
-      - audit-log-controller
+        - 🔍 Аудит
+      summary: 🔗 Получить логи по ресурсу
+      description: |
+        Возвращает историю изменений конкретного ресурса системы.
+
+        **Формат пути ресурса:**
+        ```
+        /api/v1/audit/resource/{resourceType}/{resourceId}
+        ```
+
+        | resourceType | Пример resourceId | Описание |
+        |--------------|------------------|----------|
+        | `subscription` | `sub_abc123` | История подписки |
+        | `payment` | `payment_456` | История платежа |
+        | `customer` | `user_ivan_2024` | История клиента |
+        | `plan` | `plan_premium` | История тарифа |
+        | `tenant` | `6546tds` | История организации |
+
+        **Когда использовать:**
+        - «Почему статус этой подписки изменился на `canceled`?»
+        - «Кто обновил настройки этого тарифного плана?»
+        - «Показать полную историю жизни платежа»
+
+        **Структура записи аудита:**
+        Каждая запись содержит:
+        - `timestamp` — точное время события
+        - `eventType` — тип действия (`created`, `updated`, `deleted`, `accessed`)
+        - `actor` — кто выполнил действие (API-ключ, пользователь, система)
+        - `resource` — что было изменено (тип + ID)
+        - `changes` — что именно изменилось (старое → новое значение)
+        - `ipAddress` — IP-адрес источника запроса
+        - `userAgent` — заголовок User-Agent клиента
       operationId: getAuditLogsByResource
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: resourceType
-        in: path
-        required: true
-        schema:
-          type: string
-      - name: resourceId
-        in: path
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: resourceType
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: resourceId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
-        "200":
-          description: OK
+        "404":
+          description: ❌ Ресурс не найден
           content:
             '*/*':
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+        "200":
+          description: ✅ История ресурса получена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuditLogEntry"
+        "403":
+          description: 🚫 Доступ запрещён
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+        "500":
+          description: 💥 Ошибка сервера
+          content:
+            '*/*':
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+      security:
+        - TenantAuth: []
   /api/v1/analytics:
     get:
       tags:
-      - analytics-controller
+        - 📊 Аналитика
+      summary: 📊 Получить бизнес-аналитику
+      description: |
+        Возвращает сводные метрики бизнеса для организации за текущий период.
+
+        **Период по умолчанию:**
+        - Текущий календарный месяц (с 1-го числа по сегодня)
+        - Сравнение с предыдущим периодом той же длины (для расчёта динамики)
+
+        **Параметры запроса (планируется):**
+        В будущих версиях поддерживаются:
+        - `?period=month|week|day|custom` — гранулярность данных
+        - `?startDate=2026-01-01&endDate=2026-03-31` — произвольный диапазон
+        - `?groupBy=day|week|month` — группировка временных рядов
+        - `?metrics=revenue,subscriptions,customers` — только нужные метрики
+
+        **Структура ответа:**
+
+        Ответ содержит четыре основных блока:
+
+        1. **💰 Revenue** — метрики выручки:
+           - `mrr` — Monthly Recurring Revenue (ежемесячная повторяющаяся выручка)
+           - `totalRevenue` — общая сумма всех платежей за период
+           - `averageCheck` — средний чек
+           - `growth` — изменение относительно прошлого периода (%)
+
+        2. **🔄 Subscriptions** — метрики подписок:
+           - `active` — количество активных подписок на конец периода
+           - `new` — создано за период
+           - `canceled` — отменено за период
+           - `churnRate` — коэффициент оттока (%)
+
+        3. **👥 Customers** — метрики клиентов:
+           - `total` — всего уникальных клиентов
+           - `new` — новых клиентов за период
+           - `activePayers` — клиентов с хотя бы одним успешным платежом
+
+        4. **💳 Payments** — метрики платежей:
+           - `successful` — успешно проведённых
+           - `failed` — неудачных попыток
+           - `refunded` — возвратов средств
+           - `conversionRate` — конверсия успешных платежей (%)
+
+        **Пример использования в дашборде:**
+
+        ```javascript
+        // Загрузка аналитики для графика
+        fetch('/api/v1/analytics', {
+          headers: {
+            'X-Tenant-ID': tenantId,
+            'X-API-Key': apiKey
+          }
+        })
+        .then(r => r.json())
+        .then(data => {
+          // Обновляем карточки метрик
+          document.getElementById('mrr').textContent =
+            formatCurrency(data.revenue.mrr);
+          document.getElementById('mrr-growth').className =
+            data.revenue.growth >= 0 ? 'growth-positive' : 'growth-negative';
+
+          // Рисуем график динамики
+          renderChart(data.revenue.timeseries);
+        });
+        ```
+
+        **Совет:**
+        Для отображения аналитики в реальном времени настройте периодический
+        опрос этого эндпоинта (polling) с интервалом 5-15 минут.
       operationId: getAnalytics
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
       responses:
+        "500":
+          description: 💥 Ошибка при вычислении аналитики
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 500
+                error: Internal Server Error
+                message: "Failed to compute analytics: database timeout"
         "200":
-          description: OK
+          description: ✅ Аналитика получена
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/AnalyticsResponse"
+              examples:
+                Успешный ответ:
+                  description: Успешный ответ
+                  value:
+                    period:
+                      start: 2026-03-01
+                      end: 2026-03-31
+                      previousStart: 2026-02-01
+                      previousEnd: 2026-02-29
+                    revenue:
+                      mrr: 447000
+                      arr: 5364000
+                      totalRevenue: 1341000
+                      averageCheck: 149000
+                      growth: 12.5
+                      currency: RUB
+                      timeseries:
+                        - date: 2026-03-01
+                          revenue: 44700
+                        - date: 2026-03-02
+                          revenue: 59600
+                        - date: 2026-03-03
+                          revenue: 29800
+                    subscriptions:
+                      active: 42
+                      new: 8
+                      canceled: 2
+                      churnRate: 4.8
+                      byPlan:
+                        - planCode: basic_monthly
+                          count: 28
+                        - planCode: premium_monthly
+                          count: 14
+                    customers:
+                      total: 156
+                      new: 12
+                      activePayers: 42
+                      retentionRate: 94.2
+                    payments:
+                      successful: 45
+                      failed: 3
+                      refunded: 1
+                      conversionRate: 93.8
+                      failureReasons:
+                        - reason: insufficient_funds
+                          count: 2
+                        - reason: card_expired
+                          count: 1
+                    generatedAt: 2026-03-31T22:27:38.9909694
+                    cacheTtl: 900
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 401
+                error: Unauthorized
+                message: Invalid API key or tenant ID
+      security:
+        - TenantAuth: []
   /api/v1/access/check:
     get:
       tags:
-      - access-controller
+        - 🔐 Доступ
+      summary: 🔐 Проверить доступ студента к плану
+      description: |
+        Проверяет, имеет ли студент активный доступ к указанному тарифному плану.
+
+        **Параметры запроса:**
+
+        | Параметр | Где | Описание | Пример |
+        |----------|-----|----------|--------|
+        | `studentId` | Query | Внешний идентификатор студента (из вашей LMS) | `student_ivan_2024` |
+        | `planCode` | Query | Код тарифного плана | `premium_monthly` |
+        | `X-Tenant-ID` | Header | ID вашей организации | `6546tds` |
+        | `X-API-Key` | Header | Секретный ключ | `sk_live_***` |
+
+        **Возможные ответы:**
+
+        | Статус | `hasAccess` | `status` | Когда возвращается |
+        |--------|-------------|----------|-------------------|
+        | ✅ Доступ есть | `true` | `HAS_ACCESS` | Подписка активна, срок не истёк |
+        | ❌ Нет доступа | `false` | `NO_ACTIVE_ACCESS` | Подписки нет, или она отменена/истекла |
+        | ❌ Студент не найден | `false` | `STUDENT_NOT_FOUND` | `studentId` не зарегистрирован в этом тенанте |
+        | ❌ Ошибка авторизации | — | — | Неверный `X-API-Key` или `X-Tenant-ID` (HTTP 401) |
+
+        **Примеры использования:**
+
+        🔹 **В фронтенде (показ/блокировка контента):**
+        ```javascript
+        async function canAccessContent(studentId, planCode) {
+          const response = await fetch(
+            `/api/v1/access/check?studentId=${studentId}&planCode=${planCode}`,
+            { headers: { 'X-Tenant-ID': tenantId, 'X-API-Key': apiKey } }
+          );
+          const data = await response.json();
+
+          if (data.hasAccess) {
+            showCourseContent();
+            showExpiryBadge(data.expiresAt); // "Доступ до 30 апреля"
+          } else if (data.status === 'NO_ACTIVE_ACCESS') {
+            showUpgradePrompt(planCode); // "Оформите подписку для доступа"
+          } else {
+            showError('Студент не найден');
+          }
+        }
+        ```
+
+        🔹 **В LMS (проверка перед загрузкой урока):**
+        ```java
+        // Псевдокод интеграции с Moodle/GetCourse
+        if (!accessService.checkAccess(studentExternalId, coursePlanCode)) {
+            redirect('/upgrade?plan=' + coursePlanCode);
+        } else {
+            loadLessonContent();
+        }
+        ```
+
+        **Производительность:**
+
+        - Метод оптимизирован для высоких нагрузок (сотни проверок в секунду)
+        - Результаты кэшируются на 60 секунд (настраивается)
+        - Для массовых проверок (например, при импорте студентов) используйте пакетный эндпоинт (планируется)
+
+        **Безопасность:**
+
+        - Проверка `isStudentBelongsToTenant` гарантирует, что нельзя проверить доступ студента из другого тенанта, даже зная его `studentId`
+        - В логах не фиксируются полные идентификаторы студентов
       operationId: checkAccess
       parameters:
-      - name: X-Tenant-ID
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: X-API-Key
-        in: header
-        required: true
-        schema:
-          type: string
-      - name: studentId
-        in: query
-        required: true
-        schema:
-          type: string
-      - name: planCode
-        in: query
-        required: true
-        schema:
-          type: string
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: studentId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: planCode
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: ✅ Проверка выполнена (доступ есть или нет)
           content:
             '*/*':
               schema:
                 $ref: "#/components/schemas/AccessCheckResponse"
+              examples:
+                Доступ есть:
+                  description: Доступ есть
+                  value:
+                    hasAccess: true
+                    expiresAt: 2026-04-30
+                    status: HAS_ACCESS
+                    reason: null
+                Нет активной подписки:
+                  description: Нет активной подписки
+                  value:
+                    hasAccess: false
+                    expiresAt: null
+                    status: NO_ACTIVE_ACCESS
+                    reason: Subscription canceled by user
+                Студент не найден:
+                  description: Студент не найден
+                  value:
+                    hasAccess: false
+                    expiresAt: null
+                    status: STUDENT_NOT_FOUND
+                    reason: Student with ID 'student_unknown' not found in this tenant
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 401
+                error: Unauthorized
+                message: Invalid API key or tenant ID
+        "500":
+          description: 💥 Ошибка при проверке доступа
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AccessCheckResponse"
+        "403":
+          description: 🚫 Студент не принадлежит этому тенанту
+          content:
+            '*/*':
+              example:
+                hasAccess: false
+                expiresAt: null
+                status: STUDENT_NOT_FOUND
+                reason: Student does not belong to this tenant
+      security:
+        - TenantAuth: []
 components:
   schemas:
     TenantOnboardingRequest:
       required:
-      - contactEmail
-      - organizationName
+        - contactEmail
+        - organizationName
       type: object
       properties:
         organizationName:
@@ -695,20 +2498,35 @@ components:
           type: string
         contactEmail:
           type: string
+    PaymentSettingsInfo:
+      type: object
+      properties:
+        provider:
+          type: string
+        shopConfigured:
+          type: boolean
+        currency:
+          type: string
     TenantOnboardingResponse:
       type: object
       properties:
         tenantId:
           type: string
+        organizationName:
+          type: string
         apiKey:
+          type: string
+        status:
           type: string
         createdAt:
           type: string
           format: date-time
+        paymentSettings:
+          $ref: "#/components/schemas/PaymentSettingsInfo"
     SubscriptionCreateRequest:
       required:
-      - customerId
-      - planId
+        - customerId
+        - planId
       type: object
       properties:
         customerId:
@@ -723,11 +2541,23 @@ components:
           type: string
         withAutoRenewal:
           type: boolean
-    SubscriptionCancelRequest:
+    PaymentResponse:
       type: object
       properties:
-        cancelImmediately:
-          type: boolean
+        paymentId:
+          type: string
+        status:
+          type: string
+        confirmationUrl:
+          type: string
+        amountCents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
     SubscriptionResponse:
       type: object
       properties:
@@ -752,6 +2582,11 @@ components:
         createdAt:
           type: string
           format: date-time
+    SubscriptionCancelRequest:
+      type: object
+      properties:
+        cancelImmediately:
+          type: boolean
     CancelRequest:
       type: object
       properties:
@@ -766,15 +2601,365 @@ components:
           type: string
         code:
           type: string
+    ContentDisposition:
+      type: object
+      properties:
+        type:
+          type: string
+        name:
+          type: string
+        filename:
+          type: string
+        charset:
+          type: string
+        inline:
+          type: boolean
+        formData:
+          type: boolean
+        attachment:
+          type: boolean
+    ErrorResponse:
+      type: object
+      properties:
+        headers:
+          $ref: "#/components/schemas/HttpHeaders"
+        body:
+          $ref: "#/components/schemas/ProblemDetail"
+        statusCode:
+          $ref: "#/components/schemas/HttpStatusCode"
+        typeMessageCode:
+          type: string
+        titleMessageCode:
+          type: string
+        detailMessageCode:
+          type: string
+        detailMessageArguments:
+          type: array
+          items:
+            type: object
+    HttpHeaders:
+      type: object
+      properties:
+        connection:
+          type: array
+          items:
+            type: string
+        ifModifiedSince:
+          type: integer
+          format: int64
+        contentType:
+          $ref: "#/components/schemas/MediaType"
+        contentLength:
+          type: integer
+          format: int64
+        origin:
+          type: string
+        empty:
+          type: boolean
+        location:
+          type: string
+          format: uri
+        host:
+          type: object
+          properties:
+            hostString:
+              type: string
+            address:
+              type: object
+              properties:
+                hostAddress:
+                  type: string
+                address:
+                  type: array
+                  items:
+                    type: string
+                    format: byte
+                hostName:
+                  type: string
+                linkLocalAddress:
+                  type: boolean
+                multicastAddress:
+                  type: boolean
+                anyLocalAddress:
+                  type: boolean
+                loopbackAddress:
+                  type: boolean
+                siteLocalAddress:
+                  type: boolean
+                mcglobal:
+                  type: boolean
+                mcnodeLocal:
+                  type: boolean
+                mclinkLocal:
+                  type: boolean
+                mcsiteLocal:
+                  type: boolean
+                mcorgLocal:
+                  type: boolean
+                canonicalHostName:
+                  type: string
+            port:
+              type: integer
+              format: int32
+            unresolved:
+              type: boolean
+            hostName:
+              type: string
+        all:
+          type: object
+          additionalProperties:
+            type: string
+          writeOnly: true
+        lastModified:
+          type: integer
+          format: int64
+        date:
+          type: integer
+          format: int64
+        range:
+          type: array
+          items:
+            $ref: "#/components/schemas/HttpRange"
+        contentDisposition:
+          $ref: "#/components/schemas/ContentDisposition"
+        accept:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaType"
+        acceptCharset:
+          type: array
+          items:
+            type: string
+        contentLanguage:
+          type: object
+          properties:
+            language:
+              type: string
+            displayName:
+              type: string
+            country:
+              type: string
+            variant:
+              type: string
+            script:
+              type: string
+            unicodeLocaleAttributes:
+              uniqueItems: true
+              type: array
+              items:
+                type: string
+            unicodeLocaleKeys:
+              uniqueItems: true
+              type: array
+              items:
+                type: string
+            displayLanguage:
+              type: string
+            displayScript:
+              type: string
+            displayCountry:
+              type: string
+            displayVariant:
+              type: string
+            extensionKeys:
+              uniqueItems: true
+              type: array
+              items:
+                type: string
+            iso3Language:
+              type: string
+            iso3Country:
+              type: string
+        basicAuth:
+          type: string
+          writeOnly: true
+        allow:
+          uniqueItems: true
+          type: array
+          items:
+            $ref: "#/components/schemas/HttpMethod"
+        cacheControl:
+          type: string
+        etag:
+          type: string
+        accessControlMaxAge:
+          type: integer
+          format: int64
+        accessControlRequestMethod:
+          $ref: "#/components/schemas/HttpMethod"
+        accessControlAllowOrigin:
+          type: string
+        accessControlAllowHeaders:
+          type: array
+          items:
+            type: string
+        accessControlAllowCredentials:
+          type: boolean
+        accessControlAllowMethods:
+          type: array
+          items:
+            $ref: "#/components/schemas/HttpMethod"
+        accessControlRequestHeaders:
+          type: array
+          items:
+            type: string
+        accessControlExposeHeaders:
+          type: array
+          items:
+            type: string
+        ifUnmodifiedSince:
+          type: integer
+          format: int64
+        acceptLanguageAsLocales:
+          type: array
+          items:
+            type: object
+            properties:
+              language:
+                type: string
+              displayName:
+                type: string
+              country:
+                type: string
+              variant:
+                type: string
+              script:
+                type: string
+              unicodeLocaleAttributes:
+                uniqueItems: true
+                type: array
+                items:
+                  type: string
+              unicodeLocaleKeys:
+                uniqueItems: true
+                type: array
+                items:
+                  type: string
+              displayLanguage:
+                type: string
+              displayScript:
+                type: string
+              displayCountry:
+                type: string
+              displayVariant:
+                type: string
+              extensionKeys:
+                uniqueItems: true
+                type: array
+                items:
+                  type: string
+              iso3Language:
+                type: string
+              iso3Country:
+                type: string
+        upgrade:
+          type: string
+        vary:
+          type: array
+          items:
+            type: string
+        expires:
+          type: integer
+          format: int64
+        pragma:
+          type: string
+        ifMatch:
+          type: array
+          items:
+            type: string
+        acceptPatch:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaType"
+        acceptLanguage:
+          type: array
+          items:
+            type: object
+            properties:
+              range:
+                type: string
+              weight:
+                type: number
+                format: double
+        bearerAuth:
+          type: string
+          writeOnly: true
+        ifNoneMatch:
+          type: array
+          items:
+            type: string
+    HttpMethod:
+      type: object
+    HttpRange:
+      type: object
+    HttpStatusCode:
+      type: object
+      properties:
+        error:
+          type: boolean
+        is5xxServerError:
+          type: boolean
+        is4xxClientError:
+          type: boolean
+        is1xxInformational:
+          type: boolean
+        is2xxSuccessful:
+          type: boolean
+        is3xxRedirection:
+          type: boolean
+    MediaType:
+      type: object
+      properties:
+        type:
+          type: string
+        subtype:
+          type: string
+        parameters:
+          type: object
+          additionalProperties:
+            type: string
+        qualityValue:
+          type: number
+          format: double
+        charset:
+          type: string
+        concrete:
+          type: boolean
+        wildcardType:
+          type: boolean
+        wildcardSubtype:
+          type: boolean
+        subtypeSuffix:
+          type: string
+    ProblemDetail:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri
+        properties:
+          type: object
+          additionalProperties:
+            type: object
     PlanCreateRequest:
       required:
-      - code
-      - currency
-      - interval
-      - intervalCount
-      - name
-      - priceCents
-      - trialDays
+        - code
+        - currency
+        - interval
+        - intervalCount
+        - name
+        - priceCents
+        - trialDays
       type: object
       properties:
         code:
@@ -851,10 +3036,10 @@ components:
           format: date-time
     CustomerCreateRequest:
       required:
-      - email
-      - externalId
-      - fullName
-      - isStudent
+        - email
+        - externalId
+        - fullName
+        - isStudent
       type: object
       properties:
         externalId:
@@ -894,8 +3079,8 @@ components:
           format: date-time
     TenantPaymentSettingsRequest:
       required:
-      - yookassaSecretKey
-      - yookassaShopId
+        - yookassaSecretKey
+        - yookassaShopId
       type: object
       properties:
         yookassaShopId:
@@ -904,23 +3089,6 @@ components:
         yookassaSecretKey:
           pattern: "^(live|test)_[a-zA-Z0-9\\-_]{32,}$"
           type: string
-    PaymentResponse:
-      type: object
-      properties:
-        paymentId:
-          type: string
-        status:
-          type: string
-        confirmationUrl:
-          type: string
-        amountCents:
-          type: integer
-          format: int64
-        currency:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
     AuditLogEntry:
       type: object
       properties:
@@ -991,3 +3159,17 @@ components:
           type: string
         reason:
           type: string
+  parameters:
+    X-Tenant-ID:
+      name: X-Tenant-ID
+      in: header
+      description: Идентификатор вашей организации
+      required: true
+      schema:
+        type: string
+  securitySchemes:
+    TenantAuth:
+      type: apiKey
+      description: Введите ваш API-ключ организации
+      name: X-API-Key
+      in: header
