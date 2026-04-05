@@ -10,13 +10,22 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import ru.nocode.recurlybilling.components.CSV.AnalyticsCsvExporter;
 import ru.nocode.recurlybilling.data.dto.response.AnalyticsResponse;
 import ru.nocode.recurlybilling.services.AnalyticsService;
 import ru.nocode.recurlybilling.services.TenantService;
 import ru.nocode.recurlybilling.utils.docs.AnalyticsDocs;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
+
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 
 @Slf4j
 @RestController
@@ -27,6 +36,9 @@ public class AnalyticsController {
 
     private final AnalyticsService analyticsService;
     private final TenantService tenantService;
+    private final AnalyticsCsvExporter csvExporter;
+
+    private static final DateTimeFormatter FILE_DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     @GetMapping
     @Operation(
@@ -93,6 +105,50 @@ public class AnalyticsController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         } catch (Exception e) {
             log.error("Error fetching analytics for tenant: {}", tenantId, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    @GetMapping("/export")
+    @Operation(
+            summary = "📥 Экспорт аналитики в CSV",
+            description = """
+            Скачивает отчёт в формате CSV, совместимый с Excel и Google Sheets.
+            
+            **Структура файла:**
+            1. Строка заголовков
+            2. Одна строка с основными метриками за период
+            3. (Опционально) Таблица ежедневной выручки для построения графиков
+            """,
+            tags = {"📊 Аналитика"},
+            security = { @SecurityRequirement(name = "TenantAuth") }
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "✅ CSV-файл сгенерирован"),
+            @ApiResponse(responseCode = "401", description = "🔐 Неверные учётные данные"),
+            @ApiResponse(responseCode = "500", description = "💥 Ошибка генерации отчёта")
+    })
+    public ResponseEntity<Resource> exportAnalyticsCsv(
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestHeader("X-API-Key") String apiKey) {
+
+        try {
+            tenantService.validateTenantAndApiKey(tenantId, apiKey);
+            AnalyticsResponse analytics = analyticsService.getAnalytics(tenantId);
+            String csvContent = csvExporter.exportToCsv(analytics);
+            byte[] csvBytes = csvContent.getBytes(StandardCharsets.UTF_8);
+            String filename = String.format("analytics_%s.csv", LocalDate.now().format(FILE_DATE_FMT));
+
+            Resource resource = new ByteArrayResource(csvBytes);
+
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                    .contentType(MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                    .contentLength(csvBytes.length)
+                    .body(resource);
+
+        } catch (Exception e) {
+            log.error("Failed to export analytics to CSV for tenant: {}", tenantId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
