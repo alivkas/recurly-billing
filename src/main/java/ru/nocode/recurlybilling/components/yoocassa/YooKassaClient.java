@@ -94,4 +94,20 @@ public class YooKassaClient {
 
         return response.getBody();
     }
+
+    public boolean isHealthy() {
+        try {
+            String healthUrl = "https://yookassa.ru/developers";
+
+            ResponseEntity<String> response = restTemplate.getForEntity(healthUrl, String.class);
+
+            return response.getStatusCode().is2xxSuccessful() ||
+                    response.getStatusCode().value() == 401 ||
+                    response.getStatusCode().value() == 404;
+
+        } catch (Exception e) {
+            log.debug("YooKassa health check failed: {}", e.getMessage());
+            return false;
+        }
+    }
 }

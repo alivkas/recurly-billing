@@ -1,0 +1,53 @@
+groups:
+  - name: recurly-billing-alerts
+    rules:
+      - alert: ApplicationDown
+        expr: up{job="recurly-billing"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: recurly-billing
+        annotations:
+          summary: "🔴 Приложение Recurly Billing не отвечает"
+          description: "Приложение не отвечает более 1 минуты. Проверьте сервер и логи."
+          runbook_url: "https://wiki.internal/runbooks/app-down"
+      - alert: NoSuccessfulPayments
+        expr: rate(recurly_payments_success_total[10m]) == 0 and count(recurly_payments_success_total) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: payments
+        annotations:
+          summary: "🔴 Нет успешных платежей за последние 10 минут"
+          description: "Проверьте интеграцию с ЮKassa и логи обработки вебхуков."
+      - alert: HighPaymentFailureRate
+        expr: |
+          (sum(recurly_payments_failed_total) / 
+          (sum(recurly_payments_success_total) + sum(recurly_payments_failed_total))) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: payments
+        annotations:
+          summary: "🟡 Высокий процент неудачных платежей (>10%)"
+          description: "Возможно, проблема с платёжными методами или валидацией данных."
+      - alert: YooKassaDown
+        expr: yookassa_health_status == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: yookassa
+        annotations:
+          summary: "🟡 Интеграция с ЮKassa показывает проблемы"
+          description: "Проверьте сетевое соединение и настройки клиента."
+      - alert: HighChurnRate
+        expr: |
+          (rate(recurly_subscriptions_cancelled_total[1h]) / 
+          rate(recurly_subscriptions_created_total[1h])) > 0.3
+        for: 15m
+        labels:
+          severity: warning
+          service: subscriptions
+        annotations:
+          summary: "🟡 Высокий коэффициент оттока подписок"
+          description: "Отношение отменённых к созданным подпискам >30%. Проверьте качество сервиса."

@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
+import ru.nocode.recurlybilling.components.metrics.BusinessMetrics;
 import ru.nocode.recurlybilling.components.yoocassa.YooKassaClient;
 import ru.nocode.recurlybilling.data.dto.request.YooKassaPaymentRequest;
 import ru.nocode.recurlybilling.data.dto.response.PaymentResponse;
@@ -42,6 +43,7 @@ public class PaymentService {
     private final AccessService accessService;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final BusinessMetrics businessMetrics;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public PaymentResponse createPaymentForSubscription(Subscription subscription, String idempotencyKey) throws JsonProcessingException {
@@ -139,6 +141,8 @@ public class PaymentService {
 
         String oldStatus = invoice.getStatus();
         String mappedStatus = mapYooKassaStatus(status);
+
+        businessMetrics.recordWebhookReceived(tenantId, "payment." + status, mappedStatus);
 
         invoice.setStatus(mappedStatus);
         invoice.setUpdatedAt(LocalDateTime.now());
@@ -468,6 +472,8 @@ public class PaymentService {
 
         subscriptionRepository.save(subscription);
 
+        businessMetrics.recordTrialConverted(subscription.getTenantId(), plan.getCode());
+
         log.info("Trial converted: subscription={}, nextBillingDate={}",
                 subscription.getId(), subscription.getNextBillingDate());
     }
@@ -508,6 +514,12 @@ public class PaymentService {
         } else {
             subscription.setStatus("past_due");
             subscriptionRepository.save(subscription);
+
+            businessMetrics.recordPaymentFailure(
+                    subscription.getTenantId(),
+                    invoice.getFailureReason(),
+                    invoice.getCurrency()
+            );
 
             auditLogService.logPaymentFailed(
                     subscription.getTenantId(),
@@ -685,6 +697,12 @@ public class PaymentService {
                 subscription.getCustomerId(),
                 plan.getCode(),
                 subscription.getCurrentPeriodEnd()
+        );
+
+        businessMetrics.recordPaymentSuccess(
+                tenantId,
+                invoice.getAmountCents(),
+                invoice.getCurrency()
         );
 
         auditLogService.logPaymentSuccess(

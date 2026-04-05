@@ -7,6 +7,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import ru.nocode.recurlybilling.components.metrics.BusinessMetrics;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCancelRequest;
 import ru.nocode.recurlybilling.data.dto.request.SubscriptionCreateRequest;
 import ru.nocode.recurlybilling.data.dto.response.SubscriptionResponse;
@@ -41,6 +42,7 @@ public class SubscriptionService {
     private final AccessService accessService;
     private final NotificationService notificationService;
     private final AuditLogService auditLogService;
+    private final BusinessMetrics businessMetrics;
 
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public SubscriptionResponse createSubscription(String tenantId, SubscriptionCreateRequest request, String idempotencyKey) throws JsonProcessingException {
@@ -95,6 +97,12 @@ public class SubscriptionService {
 
         Subscription saved = subscriptionRepository.save(subscription);
 
+        businessMetrics.recordSubscriptionCreated(
+                tenantId,
+                plan.getCode(),
+                plan.getTrialDays() != null && plan.getTrialDays() > 0
+        );
+
         Map<String, Object> newValues = new HashMap<>();
         newValues.put("customer_id", request.customerId());
         newValues.put("plan_id", request.planId());
@@ -134,6 +142,12 @@ public class SubscriptionService {
 
         subscription.setCanceledAt(LocalDateTime.now());
         Subscription saved = subscriptionRepository.save(subscription);
+
+        businessMetrics.recordSubscriptionCancelled(
+                tenantId,
+                request.cancelImmediately() ? "immediate" : "at_period_end",
+                request.cancelImmediately()
+        );
 
         Map<String, Object> oldValues = new HashMap<>();
         oldValues.put("status", "active");
@@ -378,6 +392,8 @@ public class SubscriptionService {
 
                 String idempotencyKey = "trial_end_" + subscription.getId() + "_" + System.currentTimeMillis();
                 paymentService.createPaymentForSubscription(subscription, idempotencyKey);
+
+                businessMetrics.recordTrialExpired(subscription.getTenantId(), plan.getCode());
 
                 log.info("Trial ended for subscription {}. First payment created.", subscription.getId());
             } catch (Exception e) {

@@ -3,8 +3,10 @@ package ru.nocode.recurlybilling.services;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ru.nocode.recurlybilling.components.metrics.BusinessMetrics;
 import ru.nocode.recurlybilling.data.dto.response.AnalyticsResponse;
 import ru.nocode.recurlybilling.data.entities.Subscription;
 import ru.nocode.recurlybilling.data.repositories.CustomerRepository;
@@ -31,6 +33,7 @@ public class AnalyticsService {
     private final CustomerRepository customerRepository;
     private final InvoiceRepository invoiceRepository;
     private final PlanRepository planRepository;
+    private final BusinessMetrics businessMetrics;
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final int CACHE_TTL_SECONDS = 900;
