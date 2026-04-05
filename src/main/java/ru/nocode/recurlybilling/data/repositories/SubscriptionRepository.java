@@ -46,4 +46,24 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
     );
     boolean existsByTenantIdAndCustomerId(String tenantId, UUID studentId);
     List<Subscription> findByStatusAndCancelAtBefore(String status, LocalDate date);
+    @Query(value = """
+    SELECT COUNT(*)
+    FROM subscriptions s
+    WHERE s.tenant_id = :tenantId 
+      AND s.status = 'cancelled'
+      AND DATE(s.canceled_at) BETWEEN :start AND :end
+    """, nativeQuery = true)
+    Long countCanceledByPeriod(
+            @Param("tenantId") String tenantId,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end);
+    @Query("""
+        SELECT p.code, COUNT(s)
+        FROM Subscription s
+        JOIN Plan p ON s.planId = p.id
+        WHERE s.tenantId = :tenantId 
+          AND s.status = 'active'
+        GROUP BY p.code
+        """)
+    List<Object[]> countActiveSubscriptionsByPlanCode(@Param("tenantId") String tenantId);
 }

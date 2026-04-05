@@ -1,6 +1,7 @@
 package ru.nocode.recurlybilling.services;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,7 @@ public class PaymentService {
         invoice.setSubscriptionId(subscription.getId());
         invoice.setAmountCents(plan.getPriceCents());
         invoice.setStatus("pending");
+        invoice.setCurrency(plan.getCurrency() != null ? plan.getCurrency() : "RUB");
         validatePaymentMethod(subscription.getPaymentMethod());
         invoice.setPaymentMethod(subscription.getPaymentMethod());
         invoice.setAttemptCount(0);
@@ -168,7 +170,11 @@ public class PaymentService {
                     .orElseThrow();
             Plan plan = planRepository.findById(subscription.getPlanId())
                     .orElseThrow(() -> new IllegalStateException("Plan not found"));
+            invoice.setPaidAt(LocalDateTime.now());
 
+            if (payment.containsKey("currency")) {
+                invoice.setCurrency((String) payment.get("currency"));
+            }
             if ("pending_deferred".equals(oldStatus)) {
                 handleTrialConversionToPaid(subscription, plan, invoice);
             }
@@ -188,6 +194,16 @@ public class PaymentService {
         }
 
         invoiceRepository.save(invoice);
+
+        if ("failed".equals(mappedStatus) || "cancelled".equals(mappedStatus)) {
+            String failureReason = extractFailureReason(webhook, payment);
+            if (failureReason != null) {
+                invoice.setFailureReason(failureReason);
+                invoiceRepository.save(invoice);
+                log.debug("Set failure reason for invoice {}: {}", invoice.getId(), failureReason);
+            }
+        }
+
         log.info("Webhook processed: paymentId={}, oldStatus={}, newStatus={}, tenant={}",
                 paymentId, oldStatus, mappedStatus, tenantId);
     }
@@ -245,6 +261,7 @@ public class PaymentService {
         invoice.setPaymentMethod(subscription.getPaymentMethod());
         invoice.setAttemptCount(0);
         invoice.setCreatedAt(LocalDateTime.now());
+        invoice.setCurrency(plan.getCurrency() != null ? plan.getCurrency() : "RUB");
         invoice.setMetadata(objectMapper.valueToTree(Map.of(
                 "purpose", "card_binding_for_trial",
                 "subscriptionId", subscription.getId().toString()
@@ -326,6 +343,7 @@ public class PaymentService {
         invoice.setPaymentMethod(subscription.getPaymentMethod());
         invoice.setAttemptCount(0);
         invoice.setCreatedAt(LocalDateTime.now());
+        invoice.setCurrency(plan.getCurrency() != null ? plan.getCurrency() : "RUB");
         invoice.setMetadata(objectMapper.valueToTree(Map.of(
                 "purpose", "trial_ending_payment",
                 "source", "notification",
@@ -385,6 +403,43 @@ public class PaymentService {
             invoiceRepository.save(savedInvoice);
             throw new RuntimeException("Payment creation failed", e);
         }
+    }
+
+    private String extractFailureReason(Map<String, Object> webhook, Map<String, Object> payment) {
+        if (payment.containsKey("cancellation_details")) {
+            Map<String, Object> details = (Map<String, Object>) payment.get("cancellation_details");
+            if (details != null && details.containsKey("reason")) {
+                return mapYooKassaFailureReason((String) details.get("reason"));
+            }
+        }
+
+        if (payment.containsKey("metadata")) {
+            Map<String, Object> metadata = (Map<String, Object>) payment.get("metadata");
+            if (metadata != null && metadata.containsKey("failure_reason")) {
+                return (String) metadata.get("failure_reason");
+            }
+        }
+
+        if ("canceled".equals(payment.get("status"))) {
+            return "payment_canceled";
+        }
+
+        return null;
+    }
+
+    private String mapYooKassaFailureReason(String yooReason) {
+        if (yooReason == null) return null;
+
+        return switch (yooReason.toLowerCase()) {
+            case "expired", "card_expired" -> "card_expired";
+            case "fraud_suspected", "fraud" -> "fraud_detected";
+            case "insufficient_funds", "not_enough_money" -> "insufficient_funds";
+            case "card_declined", "declined" -> "card_declined";
+            case "invalid_cvc", "invalid_cvv" -> "invalid_cvc";
+            case "authentication_failed", "3d_secure_failed" -> "authentication_failed";
+            case "canceled_by_merchant" -> "canceled_by_merchant";
+            default -> "processing_error";
+        };
     }
 
     private void handleTrialConversionToPaid(Subscription subscription, Plan plan, Invoice invoice) {
@@ -518,6 +573,11 @@ public class PaymentService {
         invoice.setStatus("failed");
         invoice.setUpdatedAt(LocalDateTime.now());
 
+        String failureReason = parseFailureReasonFromError(e);
+        if (failureReason != null) {
+            invoice.setFailureReason(failureReason);
+        }
+
         try {
             Map<String, Object> metadata = new HashMap<>();
             metadata.put("yookassa_error_code", e.getStatusCode().value());
@@ -527,6 +587,31 @@ public class PaymentService {
         } catch (Exception ex) {
             log.warn("Failed to save error metadata", ex);
         }
+    }
+
+    private String parseFailureReasonFromError(HttpClientErrorException e) {
+        try {
+            String body = e.getResponseBodyAsString();
+            if (body == null) return null;
+
+            JsonNode errorNode = objectMapper.readTree(body);
+            if (errorNode.has("error") && errorNode.get("error").has("description")) {
+                String description = errorNode.get("error").get("description").asText().toLowerCase();
+
+                if (description.contains("недостаточно средств") || description.contains("insufficient")) {
+                    return "insufficient_funds";
+                } else if (description.contains("срок действия") || description.contains("expired")) {
+                    return "card_expired";
+                } else if (description.contains("отклонён") || description.contains("declined")) {
+                    return "card_declined";
+                } else if (description.contains("cvc") || description.contains("cvv")) {
+                    return "invalid_cvc";
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Failed to parse failure reason from error", ex);
+        }
+        return "processing_error";
     }
 
     private YooKassaPaymentRequest buildYooKassaRequest(Invoice invoice, Subscription subscription, Plan plan) {

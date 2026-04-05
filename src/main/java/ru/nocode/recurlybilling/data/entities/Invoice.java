@@ -70,4 +70,13 @@ public class Invoice {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    @Column(name = "paid_at")
+    private LocalDateTime paidAt;
+
+    @Column(name = "failure_reason")
+    private String failureReason;
+
+    @Column(name = "currency", nullable = false)
+    private String currency = "RUB";
 }

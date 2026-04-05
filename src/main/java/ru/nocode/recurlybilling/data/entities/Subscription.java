@@ -88,4 +88,6 @@ public class Subscription {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-}
+
+    @Column(name = "canceled_at")
+    private LocalDateTime canceledAt;}

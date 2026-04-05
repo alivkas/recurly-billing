@@ -132,6 +132,7 @@ public class SubscriptionService {
             subscription.setCancelAt(subscription.getCurrentPeriodEnd());
         }
 
+        subscription.setCanceledAt(LocalDateTime.now());
         Subscription saved = subscriptionRepository.save(subscription);
 
         Map<String, Object> oldValues = new HashMap<>();
