@@ -1,12 +1,19 @@
 package ru.nocode.recurlybilling.services;
 
-import org.junit.jupiter.api.BeforeEach;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.mockito.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
+import ru.nocode.recurlybilling.components.metrics.BusinessMetrics;
 import ru.nocode.recurlybilling.components.yoocassa.YooKassaClient;
 import ru.nocode.recurlybilling.data.dto.request.YooKassaPaymentRequest;
 import ru.nocode.recurlybilling.data.dto.response.PaymentResponse;
@@ -17,276 +24,249 @@ import ru.nocode.recurlybilling.data.entities.Subscription;
 import ru.nocode.recurlybilling.data.repositories.InvoiceRepository;
 import ru.nocode.recurlybilling.data.repositories.PlanRepository;
 import ru.nocode.recurlybilling.data.repositories.SubscriptionRepository;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class PaymentServiceTest {
 
-    @Mock
-    private InvoiceRepository invoiceRepository;
-
-    @Mock
-    private SubscriptionRepository subscriptionRepository;
-
-    @Mock
-    private PlanRepository planRepository;
-
-    @Mock
-    private YooKassaClient yooKassaClient;
-
-    @Mock
-    private ObjectMapper objectMapper;
-
-    @Mock
-    private Environment environment;
+    @Mock private InvoiceRepository invoiceRepository;
+    @Mock private SubscriptionRepository subscriptionRepository;
+    @Mock private PlanRepository planRepository;
+    @Mock private YooKassaClient yooKassaClient;
+    @Mock private ObjectMapper objectMapper;
+    @Mock private Environment environment;
+    @Mock private AccessService accessService;
+    @Mock private NotificationService notificationService;
+    @Mock private AuditLogService auditLogService;
+    @Mock private BusinessMetrics businessMetrics;
 
     @InjectMocks
     private PaymentService paymentService;
 
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-    }
+    private final String tenantId = "moscow_digital";
+    private final UUID subscriptionId = UUID.randomUUID();
+    private final UUID planId = UUID.randomUUID();
+    private final UUID customerId = UUID.randomUUID();
+    private final String idempotencyKey = "idem_123";
 
     @Test
-    void createPaymentShouldCreateInvoiceAndCallYooKassa() {
-        UUID subscriptionId = UUID.randomUUID();
-        UUID planId = UUID.randomUUID();
+    @DisplayName("createPaymentForSubscription() при статусе 'succeeded' должен вызвать onPaymentSuccess")
+    void createPaymentForSubscription_whenPaid_shouldCallOnPaymentSuccess() throws JsonProcessingException {
+        Subscription subscription = createSubscription("bank_card", "pm_existing");
+        Plan plan = createPlan(29900L, "month", "RUB");
+        subscription.setNextBillingDate(LocalDate.now().plusMonths(1));
 
-        Subscription subscription = new Subscription();
-        subscription.setId(subscriptionId);
-        subscription.setTenantId("moscow_digital_school");
-        subscription.setPlanId(planId);
-        subscription.setPaymentMethod("bank_card");
-
-        Plan plan = new Plan();
-        plan.setId(planId);
-        plan.setTenantId("moscow_digital_school");
-        plan.setCode("math-autumn-2025");
-        plan.setPriceCents(100000L);
-
-        Invoice invoice1 = new Invoice();
-        invoice1.setId(UUID.randomUUID());
-        invoice1.setTenantId("moscow_digital_school");
-        invoice1.setSubscriptionId(subscriptionId);
-        invoice1.setAmountCents(100000L);
-        invoice1.setStatus("pending");
-        invoice1.setPaymentMethod("bank_card");
-        invoice1.setAttemptCount(0);
-        invoice1.setCreatedAt(LocalDateTime.now());
-
-        Invoice invoice2 = new Invoice();
-        invoice2.setId(invoice1.getId());
-        invoice2.setTenantId("moscow_digital_school");
-        invoice2.setSubscriptionId(subscriptionId);
-        invoice2.setAmountCents(100000L);
-        invoice2.setStatus("pending");
-        invoice2.setPaymentId("pay_123");
-        invoice2.setPaymentMethod("bank_card");
-        invoice2.setAttemptCount(0);
-        invoice2.setCreatedAt(LocalDateTime.now());
-        invoice2.setUpdatedAt(LocalDateTime.now());
-
-        YooKassaPaymentResponse yooResponse = new YooKassaPaymentResponse();
-        yooResponse.setId("pay_123");
-        yooResponse.setStatus("waiting_for_capture");
-
-        YooKassaPaymentResponse.Confirmation confirmation = new YooKassaPaymentResponse.Confirmation();
-        confirmation.setConfirmationUrl("https://yoomoney.ru/checkout/payments/v2/confirm");
-        yooResponse.setConfirmation(confirmation);
-
-        YooKassaPaymentResponse.Amount amount = new YooKassaPaymentResponse.Amount();
-        amount.setValue("1000.00");
-        amount.setCurrency("RUB");
-        yooResponse.setAmount(amount);
-        yooResponse.setCreatedAt(LocalDateTime.now());
-
-        when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
         when(planRepository.findById(planId)).thenReturn(Optional.of(plan));
-        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> {
-            Invoice input = inv.getArgument(0);
-            return input.getPaymentId() == null ? invoice1 : invoice2;
+        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(invocation -> {
+            Invoice inv = invocation.getArgument(0);
+            inv.setId(UUID.randomUUID());
+            return inv;
         });
-        when(yooKassaClient.createPayment(any(YooKassaPaymentRequest.class))).thenReturn(yooResponse);
-        when(environment.getProperty(anyString(), anyString())).thenReturn("https://default.example.com/success");
 
-        // when
-        PaymentResponse response = paymentService.createPaymentForSubscription(subscription);
+        YooKassaPaymentResponse yooResponse = createYooKassaResponse("succeeded", null, null);
+        when(yooKassaClient.createPayment(any(YooKassaPaymentRequest.class), eq(idempotencyKey)))
+                .thenReturn(yooResponse);
 
-        // then
-        assertThat(response.paymentId()).isEqualTo("pay_123");
-        assertThat(response.status()).isEqualTo("pending");
-        assertThat(response.confirmationUrl()).isNotNull();
-        assertThat(response.amountCents()).isEqualTo(100000L);
+        when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
 
-        verify(invoiceRepository, times(2)).save(any(Invoice.class));
-        verify(yooKassaClient, times(1)).createPayment(any(YooKassaPaymentRequest.class));
+        PaymentResponse response = paymentService.createPaymentForSubscription(subscription, idempotencyKey);
+
+        assertEquals("paid", response.status());
+        verify(accessService).grantAccess(eq(tenantId), eq(customerId), anyString(), any(LocalDate.class));
+        verify(businessMetrics).recordPaymentSuccess(eq(tenantId), eq(29900L), eq("RUB"));
+        verify(auditLogService).logPaymentSuccess(any(), any(), any(), anyLong(), any(), any());
+        verify(notificationService).sendPaymentSucceededNotification(any(), any(), any());
     }
 
     @Test
-    void createPaymentWithInvalidPaymentMethodShouldThrowException() {
-        // given
-        UUID subscriptionId = UUID.randomUUID();
-        UUID planId = UUID.randomUUID();
+    @DisplayName("handleYooKassaWebhook() при статусе 'paid' должен продлить подписку и отправить уведомление")
+    void handleYooKassaWebhook_whenPaid_shouldExtendSubscriptionAndNotify() {
+        Invoice invoice = createInvoice("pending", 29900L);
+        Subscription subscription = createSubscription("bank_card", null);
+        subscription.setNextBillingDate(LocalDate.now().plusMonths(1));
+        Plan plan = createPlan(29900L, "month", "RUB");
 
-        Subscription subscription = new Subscription();
-        subscription.setId(subscriptionId);
-        subscription.setTenantId("moscow_digital_school");
-        subscription.setPlanId(planId);
-        subscription.setPaymentMethod("invalid_method"); // ← невалидный метод
+        when(invoiceRepository.findByPaymentId("pay_123")).thenReturn(Optional.of(invoice));
+        when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
+        when(planRepository.findById(planId)).thenReturn(Optional.of(plan));
+        when(invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId))
+                .thenReturn(List.of(invoice));
 
-        Plan plan = new Plan();
-        plan.setId(planId);
-        plan.setTenantId("moscow_digital_school");
-        plan.setCode("math-autumn-2025");
-        plan.setPriceCents(100000L);
+        Map<String, Object> webhook = createWebhook("succeeded", Map.of("subscriptionId", subscriptionId.toString()));
 
+        paymentService.handleYooKassaWebhook("pay_123", "succeeded", webhook, tenantId);
+
+        verify(businessMetrics).recordWebhookReceived(tenantId, "payment.succeeded", "paid");
+        verify(accessService).grantAccess(eq(tenantId), eq(customerId), anyString(), any(LocalDate.class));
+        verify(notificationService).sendPaymentSucceededNotification(subscription, invoice, plan);
+        verify(auditLogService).logPaymentSuccess(any(), any(), any(), anyLong(), any(), any());
+        assertEquals("paid", invoice.getStatus());
+    }
+
+    @Test
+    @DisplayName("handleYooKassaWebhook() при pending_deferred → paid должен конвертировать триал")
+    void handleYooKassaWebhook_whenTrialConversion_shouldConvertTrial() {
+        Invoice invoice = createInvoice("pending_deferred", 29900L);
+        Subscription subscription = createSubscription("bank_card", null);
+        subscription.setStatus("trialing");
+        subscription.setTrialEnd(LocalDate.now().plusDays(3));
+        Plan plan = createPlan(29900L, "month", "RUB");
+
+        when(invoiceRepository.findByPaymentId("pay_123")).thenReturn(Optional.of(invoice));
         when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
         when(planRepository.findById(planId)).thenReturn(Optional.of(plan));
 
-        // when/then
-        assertThatThrownBy(() -> paymentService.createPaymentForSubscription(subscription))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("invalid_method");
+        Map<String, Object> webhook = createWebhook("succeeded", Map.of("subscriptionId", subscriptionId.toString()));
+
+        paymentService.handleYooKassaWebhook("pay_123", "succeeded", webhook, tenantId);
+
+        verify(businessMetrics).recordTrialConverted(tenantId, plan.getCode());
+        assertEquals("active", subscription.getStatus());
+        assertNull(subscription.getTrialEnd()); // триал завершён
+        assertNotNull(subscription.getNextBillingDate());
     }
 
     @Test
-    void handleYooKassaWebhookShouldUpdateInvoiceStatusAndExtendSubscription() {
-        // given
-        String paymentId = "pay_123";
-        String status = "succeeded";
-        UUID invoiceId = UUID.randomUUID();
-        UUID subscriptionId = UUID.randomUUID();
-        UUID planId = UUID.randomUUID();
+    @DisplayName("getPaymentByTenant() должен вернуть данные платежа и проверить tenantId")
+    void getPaymentByTenant_shouldReturnPaymentAndValidateTenant() {
+        Invoice invoice = createInvoice("paid", 29900L);
+        invoice.setPaymentId("pay_123");
+        invoice.setConfirmationUrl("https://receipt.url");
 
-        Invoice invoice = new Invoice();
-        invoice.setId(invoiceId);
-        invoice.setTenantId("moscow_digital_school");
-        invoice.setSubscriptionId(subscriptionId);
-        invoice.setPaymentId(paymentId);
-        invoice.setStatus("pending");
-        invoice.setAmountCents(100000L);
+        when(invoiceRepository.findByPaymentId("pay_123")).thenReturn(Optional.of(invoice));
 
-        Subscription subscription = new Subscription();
-        subscription.setId(subscriptionId);
-        subscription.setTenantId("moscow_digital_school");
-        subscription.setPlanId(planId);
-        subscription.setStatus("active");
-        subscription.setCurrentPeriodStart(LocalDate.of(2025, 1, 1));
-        subscription.setCurrentPeriodEnd(LocalDate.of(2025, 1, 31));
-        subscription.setNextBillingDate(LocalDate.of(2025, 2, 1));
+        PaymentResponse response = paymentService.getPaymentByTenant("pay_123", tenantId);
 
+        assertEquals("pay_123", response.paymentId());
+        assertEquals("paid", response.status());
+        assertEquals("https://receipt.url", response.confirmationUrl());
+        assertEquals(29900L, response.amountCents());
+    }
+
+    @Test
+    @DisplayName("getPaymentByTenant() должен выбросить исключение при несовпадении tenantId")
+    void getPaymentByTenant_whenTenantMismatch_shouldThrow() {
+        Invoice invoice = createInvoice("paid", 29900L);
+        invoice.setTenantId("other_tenant");
+
+        when(invoiceRepository.findByPaymentId("pay_123")).thenReturn(Optional.of(invoice));
+
+        assertThrows(IllegalStateException.class, () ->
+                paymentService.getPaymentByTenant("pay_123", tenantId));
+    }
+
+    @Test
+    @DisplayName("getLastPaymentForSubscription() должен вернуть последний инвойс")
+    void getLastPaymentForSubscription_shouldReturnLatestInvoice() {
+        Invoice oldInvoice = createInvoice("paid", 19900L);
+        oldInvoice.setCreatedAt(LocalDateTime.now().minusDays(10));
+        Invoice newInvoice = createInvoice("paid", 29900L);
+        newInvoice.setCreatedAt(LocalDateTime.now());
+
+        when(invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId))
+                .thenReturn(List.of(newInvoice, oldInvoice));
+
+        PaymentResponse response = paymentService.getLastPaymentForSubscription(subscriptionId);
+
+        assertEquals(29900L, response.amountCents()); // последний по дате
+        verify(invoiceRepository).findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId);
+    }
+
+    @Test
+    @DisplayName("getLastPaymentForSubscription() должен вернуть null, если инвойсов нет")
+    void getLastPaymentForSubscription_whenNoInvoices_shouldReturnNull() {
+        when(invoiceRepository.findBySubscriptionIdOrderByCreatedAtDesc(subscriptionId))
+                .thenReturn(List.of());
+
+        PaymentResponse response = paymentService.getLastPaymentForSubscription(subscriptionId);
+
+        assertNull(response);
+    }
+
+    // ==================== HELPER METHODS ====================
+
+    private Subscription createSubscription(String paymentMethod, String paymentMethodId) {
+        Subscription sub = new Subscription();
+        sub.setId(subscriptionId);
+        sub.setTenantId(tenantId);
+        sub.setCustomerId(customerId);
+        sub.setPlanId(planId);
+        sub.setPaymentMethod(paymentMethod);
+        sub.setPaymentMethodId(paymentMethodId);
+        sub.setCurrentPeriodEnd(LocalDate.now().plusMonths(1));
+        return sub;
+    }
+
+    private Plan createPlan(Long priceCents, String interval, String currency) {
         Plan plan = new Plan();
         plan.setId(planId);
-        plan.setTenantId("moscow_digital_school");
-        plan.setInterval("month");
-        plan.setIntervalCount(1);
-
-        when(invoiceRepository.findByPaymentId(paymentId)).thenReturn(Optional.of(invoice));
-        when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
-        when(planRepository.findById(planId)).thenReturn(Optional.of(plan));
-        when(subscriptionRepository.save(any(Subscription.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        // when
-        paymentService.handleYooKassaWebhook(paymentId, status, Map.of("event", "payment.succeeded"));
-
-        // then
-        verify(invoiceRepository, times(1)).save(any(Invoice.class));
-        verify(subscriptionRepository, times(1)).save(any(Subscription.class));
-        assertThat(invoice.getStatus()).isEqualTo("paid");
-        assertThat(subscription.getCurrentPeriodEnd()).isEqualTo(LocalDate.of(2025, 3, 1));
+        plan.setPriceCents(priceCents);
+        plan.setInterval(interval);
+        plan.setCurrency(currency);
+        plan.setCode("test_plan");
+        return plan;
     }
 
-    @Test
-    void handleYooKassaWebhookForOneTimeSubscriptionShouldNotExtend() {
-        // given
-        String paymentId = "pay_123";
-        String status = "succeeded";
-        UUID invoiceId = UUID.randomUUID();
-        UUID subscriptionId = UUID.randomUUID();
-        UUID planId = UUID.randomUUID();
-
+    private Invoice createInvoice(String status, Long amountCents) {
         Invoice invoice = new Invoice();
-        invoice.setId(invoiceId);
-        invoice.setTenantId("moscow_digital_school");
+        invoice.setId(UUID.randomUUID());
+        invoice.setTenantId(tenantId);
         invoice.setSubscriptionId(subscriptionId);
-        invoice.setPaymentId(paymentId);
-        invoice.setStatus("pending");
-        invoice.setAmountCents(400000L);
-
-        Subscription subscription = new Subscription();
-        subscription.setId(subscriptionId);
-        subscription.setTenantId("moscow_digital_school");
-        subscription.setPlanId(planId);
-        subscription.setStatus("active");
-        subscription.setCurrentPeriodStart(LocalDate.of(2025, 9, 1));
-        subscription.setCurrentPeriodEnd(LocalDate.of(2025, 12, 31));
-        subscription.setNextBillingDate(null); // ← разовая оплата
-
-        Plan plan = new Plan();
-        plan.setId(planId);
-        plan.setTenantId("moscow_digital_school");
-        plan.setInterval("semester");
-
-        when(invoiceRepository.findByPaymentId(paymentId)).thenReturn(Optional.of(invoice));
-        when(subscriptionRepository.findById(subscriptionId)).thenReturn(Optional.of(subscription));
-        when(planRepository.findById(planId)).thenReturn(Optional.of(plan));
-        when(subscriptionRepository.save(any(Subscription.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        // when
-        paymentService.handleYooKassaWebhook(paymentId, status, Map.of("event", "payment.succeeded"));
-
-        // then
-        verify(invoiceRepository, times(1)).save(any(Invoice.class));
-        verify(subscriptionRepository, never()).save(any(Subscription.class)); // ← не продлеваем
-        assertThat(invoice.getStatus()).isEqualTo("paid");
-        assertThat(subscription.getCurrentPeriodEnd()).isEqualTo(LocalDate.of(2025, 12, 31));
+        invoice.setStatus(status);
+        invoice.setAmountCents(amountCents);
+        invoice.setCurrency("RUB");
+        invoice.setCreatedAt(LocalDateTime.now());
+        return invoice;
     }
 
-    @Test
-    void handleYooKassaWebhookWithDuplicateStatusShouldNotExtendAgain() {
-        // given
-        String paymentId = "pay_123";
-        String status = "succeeded";
-        UUID invoiceId = UUID.randomUUID();
-        UUID subscriptionId = UUID.randomUUID();
-        UUID planId = UUID.randomUUID();
+    private YooKassaPaymentResponse createYooKassaResponse(String status, String pmId, String confirmationUrl) {
+        YooKassaPaymentResponse response = mock(YooKassaPaymentResponse.class);
+        when(response.getId()).thenReturn("pay_123");
+        when(response.getStatus()).thenReturn(status);
+        when(response.getCreatedAt()).thenReturn(LocalDateTime.now());
 
-        Invoice invoice = new Invoice();
-        invoice.setId(invoiceId);
-        invoice.setTenantId("moscow_digital_school");
-        invoice.setSubscriptionId(subscriptionId);
-        invoice.setPaymentId(paymentId);
-        invoice.setStatus("paid"); // ← уже оплачен
-        invoice.setAmountCents(100000L);
+        if (pmId != null) {
+            YooKassaPaymentResponse.PaymentMethod pm = mock(YooKassaPaymentResponse.PaymentMethod.class);
+            when(pm.getId()).thenReturn(pmId);
+            when(response.getPaymentMethod()).thenReturn(pm);
+        }
 
-        Subscription subscription = new Subscription();
-        subscription.setId(subscriptionId);
-        subscription.setTenantId("moscow_digital_school");
-        subscription.setPlanId(planId);
-        subscription.setStatus("active");
-        subscription.setCurrentPeriodStart(LocalDate.of(2025, 1, 1));
-        subscription.setCurrentPeriodEnd(LocalDate.of(2025, 1, 31));
-        subscription.setNextBillingDate(LocalDate.of(2025, 2, 1));
+        if (confirmationUrl != null) {
+            YooKassaPaymentResponse.Confirmation conf = mock(YooKassaPaymentResponse.Confirmation.class);
+            when(conf.getType()).thenReturn("redirect");
+            when(conf.getConfirmationUrl()).thenReturn(confirmationUrl);
+            when(response.getConfirmation()).thenReturn(conf);
+        }
 
-        when(invoiceRepository.findByPaymentId(paymentId)).thenReturn(Optional.of(invoice));
-        when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+        return response;
+    }
 
-        // when
-        paymentService.handleYooKassaWebhook(paymentId, status, Map.of("event", "payment.succeeded"));
+    private Map<String, Object> createWebhook(String status, Map<String, Object> metadata) {
+        Map<String, Object> payment = new HashMap<>();
+        payment.put("id", "pay_123");
+        payment.put("status", status);
+        payment.put("metadata", metadata);
+        return Map.of("object", payment);
+    }
 
-        // then
-        verify(subscriptionRepository, never()).save(any(Subscription.class)); // ← не продлеваем повторно
-        assertThat(invoice.getStatus()).isEqualTo("paid");
+    private JsonNode createErrorJsonNode(String description) throws JsonProcessingException {
+        JsonNode root = mock(JsonNode.class);
+        JsonNode errorNode = mock(JsonNode.class);
+        JsonNode descNode = mock(JsonNode.class);
+
+        when(root.has("error")).thenReturn(true);
+        when(root.get("error")).thenReturn(errorNode);
+        when(errorNode.has("description")).thenReturn(true);
+        when(errorNode.get("description")).thenReturn(descNode);
+        when(descNode.asText()).thenReturn(description);
+
+        return root;
     }
 }

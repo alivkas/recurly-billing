@@ -21,7 +21,7 @@ public class CustomerService {
 
     private final CustomerRepository customerRepository;
     private final EncryptionService encryptionService;
-    private final TenantService tenantService; // для валидации
+    private final TenantService tenantService;
 
     @Transactional
     public CustomerResponse createCustomer(String tenantId, CustomerCreateRequest request) {
