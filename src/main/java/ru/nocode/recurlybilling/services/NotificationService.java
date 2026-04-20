@@ -1,9 +1,13 @@
 package ru.nocode.recurlybilling.services;
 
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -31,6 +35,7 @@ public class NotificationService {
     private final TenantRepository tenantRepository;
     private final CustomerRepository customerRepository;
     private final TelegramBot telegramBot;
+    private final JavaMailSender javaMailSender;
     private final EncryptionService encryptionService;
     private final StudentAuthService studentAuthService;
     private final InvoiceRepository invoiceRepository;
@@ -38,6 +43,12 @@ public class NotificationService {
 
     @Value("${notifications.telegram.enabled:true}")
     private boolean telegramEnabled;
+
+    @Value("${notifications.email.enabled:true}")
+    private boolean emailEnabled;
+
+    @Value("${spring.mail.username}")
+    private String emailUsername;
 
     @Value("${notifications.upcoming-days:3}")
     private int upcomingDays;
@@ -77,6 +88,18 @@ public class NotificationService {
             );
 
             sendTelegramNotificationAsync(notification, message);
+        }
+
+        if (emailEnabled) {
+            String email = getCustomerEmail(subscription.getCustomerId());
+            if (email != null && !email.isBlank()) {
+                String subject = "Предстоящий платёж за подписку";
+                String htmlContent = buildUpcomingPaymentMessage(subscription, plan, tenant, true);
+                Notification notification = createNotification(
+                        subscription, "upcoming_payment", "email",
+                        email, subject, htmlContent);
+                sendEmailNotificationAsync(notification, subject, htmlContent, email);
+            }
         }
     }
 
@@ -132,6 +155,20 @@ public class NotificationService {
 
             sendTelegramNotificationAsync(notification, message);
         }
+
+        if (emailEnabled) {
+            String email = getCustomerEmail(subscription.getCustomerId());
+            if (email != null && !email.isBlank()) {
+                String tempCode = studentAuthService.generateTemporaryCode(
+                        subscription.getTenantId(), customer.getExternalId());
+                String subject = "Платёж успешен — доступ открыт";
+                String htmlContent = buildPaymentSucceededMessage(subscription, invoice, plan, tenant, tempCode, true);
+                Notification notification = createNotification(
+                        subscription, "payment_succeeded", "email",
+                        email, subject, htmlContent);
+                sendEmailNotificationAsync(notification, subject, htmlContent, email);
+            }
+        }
     }
 
     @Transactional
@@ -176,6 +213,18 @@ public class NotificationService {
 
             sendTelegramNotificationAsync(notification, message);
         }
+
+        if (emailEnabled) {
+            String email = getCustomerEmail(subscription.getCustomerId());
+            if (email != null && !email.isBlank()) {
+                String subject = "Не удалось списать платёж";
+                String htmlContent = buildPaymentFailedMessage(subscription, invoice, plan, tenant, true);
+                Notification notification = createNotification(
+                        subscription, "payment_failed", "email",
+                        email, subject, htmlContent);
+                sendEmailNotificationAsync(notification, subject, htmlContent, email);
+            }
+        }
     }
 
     private String getCustomerName(UUID customerId, String tenantId) {
@@ -194,6 +243,19 @@ public class NotificationService {
     private Long getCustomerTelegramChatId(UUID customerId, String tenantId) {
         return customerRepository.findById(customerId)
                 .map(Customer::getTelegramChatId)
+                .orElse(null);
+    }
+
+    private String getCustomerEmail(UUID customerId) {
+        return customerRepository.findById(customerId)
+                .map(c -> {
+                    try {
+                        return encryptionService.decrypt(c.getEmail());
+                    } catch (Exception e) {
+                        log.error("Failed to decrypt email for customer: {}", customerId, e);
+                        return null;
+                    }
+                })
                 .orElse(null);
     }
 
@@ -326,6 +388,19 @@ public class NotificationService {
             log.info("Trial ending notification with payment link sent: subscription={}, url={}",
                     subscription.getId(), paymentUrl != null);
         }
+
+        if (emailEnabled) {
+            String paymentUrl = getOrCreateTrialPaymentLink(subscription);
+            String email = getCustomerEmail(subscription.getCustomerId());
+            if (email != null && !email.isBlank()) {
+                String subject = "Пробный период заканчивается — оплатите подписку";
+                String htmlContent = buildTrialEndingMessage(subscription, plan, tenant, paymentUrl, true);
+                Notification notification = createNotification(
+                        subscription, "trial_ending", "email",
+                        email, subject, htmlContent);
+                sendEmailNotificationAsync(notification, subject, htmlContent, email);
+            }
+        }
     }
 
     private String getOrCreateTrialPaymentLink(Subscription subscription) {
@@ -362,5 +437,181 @@ public class NotificationService {
         if (trialEnd == null) return "в ближайшее время";
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("d MMMM yyyy 'в' HH:mm", new Locale("ru"));
         return trialEnd.format(formatter);
+    }
+
+    private String buildUpcomingPaymentMessage(Subscription subscription, Plan plan, Tenant tenant, boolean isEmail) {
+        String customerName = getCustomerName(subscription.getCustomerId(), tenant.getTenantId());
+        double amount = plan.getPriceCents() / 100.0;
+        String nextBilling = subscription.getNextBillingDate() != null
+                ? subscription.getNextBillingDate().toString() : "не запланировано";
+            return String.format("""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="UTF-8"><style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .header { background: #4A90E2; color: white; padding: 20px; text-align: center; }
+                    .content { padding: 20px; }
+                    .amount { font-size: 24px; font-weight: bold; color: #2E7D32; }
+                    .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+                </style></head>
+                <body>
+                    <div class="header"><h2>💳 Предстоящий платёж</h2></div>
+                    <div class="content">
+                        <p>Здравствуйте, <b>%s</b>!</p>
+                        <p>Ваш платёж на сумму <span class="amount">%s ₽</span> за подписку «<b>%s</b>» будет списан <b>%s</b>.</p>
+                        <p>Если у вас есть вопросы — напишите нам в поддержку.</p>
+                    </div>
+                    <div class="footer">С уважением, команда %s</div>
+                </body>
+                </html>
+                """, customerName, amount, plan.getName(), nextBilling, tenant.getName());
+
+    }
+
+    private String buildPaymentSucceededMessage(Subscription subscription, Invoice invoice, Plan plan, Tenant tenant, String tempCode, boolean isEmail) {
+        String customerName = getCustomerName(subscription.getCustomerId(), tenant.getTenantId());
+        double amount = invoice.getAmountCents() / 100.0;
+        String nextBilling = subscription.getNextBillingDate() != null
+                ? subscription.getNextBillingDate().toString() : "не запланировано";
+
+            return String.format("""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="UTF-8"><style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .header { background: #2E7D32; color: white; padding: 20px; text-align: center; }
+                    .content { padding: 20px; }
+                    .code { background: #f0f0f0; padding: 10px 15px; font-family: monospace; font-size: 18px; letter-spacing: 3px; border-radius: 4px; display: inline-block; margin: 10px 0; }
+                    .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+                </style></head>
+                <body>
+                    <div class="header"><h2>✅ Платёж успешен</h2></div>
+                    <div class="content">
+                        <p>Здравствуйте, <b>%s</b>!</p>
+                        <p>Ваш платёж на сумму <b>%s ₽</b> за подписку «<b>%s</b>» успешно проведён.</p>
+                        <p><b>Ваш код для входа в личный кабинет:</b></p>
+                        <div class="code">%s</div>
+                        <p><i>Код действует 24 часа. Используйте его на странице входа.</i></p>
+                        <p>ID платежа: <code>%s</code><br>
+                        Следующее списание: <b>%s</b></p>
+                    </div>
+                    <div class="footer">С уважением, команда %s</div>
+                </body>
+                </html>
+                """, customerName, amount, plan.getName(), tempCode, invoice.getPaymentId(), nextBilling, tenant.getName());
+    }
+
+    private String buildPaymentFailedMessage(Subscription subscription, Invoice invoice, Plan plan, Tenant tenant, boolean isEmail) {
+        String customerName = getCustomerName(subscription.getCustomerId(), tenant.getTenantId());
+        double amount = invoice.getAmountCents() / 100.0;
+        int attempt = invoice.getAttemptCount() + 1;
+
+            return String.format("""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="UTF-8"><style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .header { background: #D32F2F; color: white; padding: 20px; text-align: center; }
+                    .content { padding: 20px; }
+                    .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 15px 0; }
+                    .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+                </style></head>
+                <body>
+                    <div class="header"><h2>❌ Неудачная попытка оплаты</h2></div>
+                    <div class="content">
+                        <p>Здравствуйте, <b>%s</b>!</p>
+                        <p>Платёж на сумму <b>%s ₽</b> за подписку «<b>%s</b>» не прошёл.</p>
+                        <p>ID платежа: <code>%s</code><br>
+                        Попытка: <b>#%d</b></p>
+                        <div class="warning">
+                            <p><b>Что делать:</b></p>
+                            <ul>
+                                <li>Проверьте данные карты (номер, срок, CVC)</li>
+                                <li>Убедитесь, что на карте достаточно средств</li>
+                                <li>Попробуйте добавить другой способ оплаты</li>
+                            </ul>
+                        </div>
+                        <p>Если проблема не решается — напишите в поддержку.</p>
+                    </div>
+                    <div class="footer">С уважением, команда %s</div>
+                </body>
+                </html>
+                """, customerName, amount, plan.getName(), invoice.getPaymentId(), attempt, tenant.getName());
+    }
+
+    private String buildTrialEndingMessage(Subscription subscription, Plan plan, Tenant tenant, String paymentUrl, boolean isEmail) {
+        String customerName = getCustomerName(subscription.getCustomerId(), tenant.getTenantId());
+        String trialEnd = formatTrialEndDate(subscription.getTrialEnd().atStartOfDay());
+        String paymentInstruction = buildPaymentInstructionBlock(subscription);
+        String actionText = paymentUrl != null && !paymentUrl.isBlank()
+                ? String.format("🔗 <a href=\"%s\">💳 Оплатить и продлить доступ</a>", paymentUrl)
+                : "Обратитесь в поддержку для завершения оплаты.";
+
+            return String.format("""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="UTF-8"><style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .header { background: #FF9800; color: white; padding: 20px; text-align: center; }
+                    .content { padding: 20px; }
+                    .deadline { background: #fff3e0; border-left: 4px solid #FF9800; padding: 12px; margin: 15px 0; font-weight: bold; }
+                    .button { display: inline-block; background: #4A90E2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; margin: 15px 0; }
+                    .footer { background: #f5f5f5; padding: 15px; text-align: center; font-size: 12px; color: #666; }
+                </style></head>
+                <body>
+                    <div class="header"><h2>⏳ Пробный период заканчивается</h2></div>
+                    <div class="content">
+                        <p>Здравствуйте, <b>%s</b>!</p>
+                        <p>Ваш пробный период для курса «<b>%s</b>» заканчивается <b>%s</b>.</p>
+                        <div class="deadline">%s</div>
+                        %s
+                        <p><i>Если вы не хотите продолжать подписку — отмените её до окончания пробного периода.</i></p>
+                    </div>
+                    <div class="footer">С уважением, команда %s</div>
+                </body>
+                </html>
+                """, customerName, plan.getName(), trialEnd, paymentInstruction, actionText, tenant.getName());
+    }
+
+    @Async
+    public void sendEmailNotificationAsync(Notification notification, String subject, String htmlContent, String recipient) {
+        try {
+            MimeMessage message = javaMailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+
+            helper.setTo(recipient);
+            helper.setSubject(subject);
+            helper.setText(htmlContent, true);
+            helper.setFrom("lyamzy@yandex.ru");
+            helper.setReplyTo("support@your-domain.ru");
+
+            javaMailSender.send(message);
+
+            notification.setStatus("sent");
+            notification.setSentAt(LocalDateTime.now());
+            notificationRepository.save(notification);
+
+            log.info("✉️ Email sent to: {}", recipient);
+        } catch (jakarta.mail.AuthenticationFailedException e) {
+            log.error("❌ SMTP Authentication failed: check username/password for {}", recipient, e);
+            notification.setStatus("failed");
+            notification.setSentAt(LocalDateTime.now());
+            notification.setErrorMessage("Authentication failed: " + e.getMessage());
+            notificationRepository.save(notification);
+
+        } catch (jakarta.mail.MessagingException e) {
+            log.error("❌ Failed to send email to {}: {}", recipient, e.getMessage(), e);
+            notification.setStatus("failed");
+            notification.setSentAt(LocalDateTime.now());
+            notification.setErrorMessage(e.getMessage());
+            notificationRepository.save(notification);
+
+        } catch (Exception e) {
+            log.error("❌ Unexpected error sending email to: {}", recipient, e);
+            notification.setStatus("failed");
+            notification.setSentAt(LocalDateTime.now());
+            notification.setErrorMessage(e.getMessage());
+            notificationRepository.save(notification);
+        }
     }
 }

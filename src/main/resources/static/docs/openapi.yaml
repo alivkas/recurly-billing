@@ -346,34 +346,15 @@ paths:
               $ref: "#/components/schemas/TenantOnboardingRequest"
         required: true
       responses:
-        "201":
-          description: ✅ Организация успешно зарегистрирована
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/TenantOnboardingResponse"
-              examples:
-                Успешная регистрация:
-                  description: Успешная регистрация
-                  value:
-                    tenantId: tn_7f8a9b2c3d4e5f6g
-                    organizationName: Онлайн-школа «ПрофИТ»
-                    apiKey: sk_test_XXXXXXXXXXXXXXXXXXXXXXXX
-                    createdAt: 2024-03-31T10:30:00Z
-                    status: ACTIVE
-                    paymentSettings:
-                      provider: YOOKASSA
-                      currency: RUB
-                      recurringEnabled: true
-        "409":
-          description: ⚠️ Организация с таким названием или email уже существует
+        "500":
+          description: 💥 Внутренняя ошибка сервера
           content:
             '*/*':
               example:
                 timestamp: 2024-03-31T10:30:00Z
-                status: 409
-                error: Conflict
-                message: Organization with email 'info@profit-school.ru' already exists
+                status: 500
+                error: Internal Server Error
+                message: Произошла непредвиденная ошибка. Попробуйте позже.
         "400":
           description: ❌ Ошибка валидации входных данных
           content:
@@ -393,15 +374,34 @@ paths:
                     status: 400
                     error: Bad Request
                     message: "contactPhone: неверный формат номера телефона"
-        "500":
-          description: 💥 Внутренняя ошибка сервера
+        "201":
+          description: ✅ Организация успешно зарегистрирована
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/TenantOnboardingResponse"
+              examples:
+                Успешная регистрация:
+                  description: Успешная регистрация
+                  value:
+                    tenantId: tn_7f8a9b2c3d4e5f6g
+                    organizationName: Онлайн-школа «ПрофИТ»
+                    apiKey: sk_live_9x8y7z6w5v4u3t2s1r0q
+                    createdAt: 2024-03-31T10:30:00Z
+                    status: ACTIVE
+                    paymentSettings:
+                      provider: YOOKASSA
+                      currency: RUB
+                      recurringEnabled: true
+        "409":
+          description: ⚠️ Организация с таким названием или email уже существует
           content:
             '*/*':
               example:
                 timestamp: 2024-03-31T10:30:00Z
-                status: 500
-                error: Internal Server Error
-                message: Произошла непредвиденная ошибка. Попробуйте позже.
+                status: 409
+                error: Conflict
+                message: Organization with email 'info@profit-school.ru' already exists
   /api/v1/subscriptions:
     post:
       tags:
@@ -478,18 +478,6 @@ paths:
                     currentPeriodStart: 2026-03-31T22:27:38.9909694
                     currentPeriodEnd: 2026-04-30T22:27:38.9909694
                     createdAt: 2026-03-31T22:27:38.9909694
-        "403":
-          description: 🚫 Недостаточно прав
-          content:
-            '*/*':
-              schema:
-                type: object
-        "401":
-          description: 🔐 Отсутствуют заголовки авторизации
-          content:
-            '*/*':
-              schema:
-                type: object
         "400":
           description: ❌ Ошибка валидации или бизнес-правил
           content:
@@ -509,6 +497,18 @@ paths:
                     status: 400
                     error: Bad Request
                     message: Customer with ID 'cust_unknown' not found
+        "403":
+          description: 🚫 Недостаточно прав
+          content:
+            '*/*':
+              schema:
+                type: object
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+          content:
+            '*/*':
+              schema:
+                type: object
         "500":
           description: 💥 Ошибка сервера
           content:
@@ -560,6 +560,12 @@ paths:
               $ref: "#/components/schemas/SubscriptionCancelRequest"
         required: true
       responses:
+        "200":
+          description: ✅ Подписка отменена
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/SubscriptionResponse"
         "403":
           description: 🚫 Недостаточно прав
           content:
@@ -580,12 +586,6 @@ paths:
                 $ref: "#/components/schemas/SubscriptionResponse"
         "400":
           description: "❌ Нельзя отменить: уже отменена или неверные параметры"
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/SubscriptionResponse"
-        "200":
-          description: ✅ Подписка отменена
           content:
             '*/*':
               schema:
@@ -664,12 +664,6 @@ paths:
               $ref: "#/components/schemas/CancelRequest"
         required: true
       responses:
-        "400":
-          description: "❌ Нельзя отменить: нет активной подписки"
-          content:
-            '*/*':
-              example:
-                error: No active subscription found
         "200":
           description: ✅ Подписка отменена
           content:
@@ -691,6 +685,12 @@ paths:
             '*/*':
               schema:
                 type: object
+        "400":
+          description: "❌ Нельзя отменить: нет активной подписки"
+          content:
+            '*/*':
+              example:
+                error: No active subscription found
   /api/v1/student/login:
     post:
       tags:
@@ -756,13 +756,12 @@ paths:
               $ref: "#/components/schemas/LoginRequest"
         required: true
       responses:
-        "404":
-          description: ❌ Студент или тенант не найден
+        "500":
+          description: 💥 Внутренняя ошибка сервера
           content:
             '*/*':
               example:
-                error: "STUDENT_NOT_FOUND: Student with ID 'student_unknown' not found\
-                  \ in tenant"
+                error: Internal server error
         "200":
           description: ✅ Аутентификация успешна
           content:
@@ -793,12 +792,13 @@ paths:
                   value:
                     error: "TOO_MANY_ATTEMPTS: Превышен лимит попыток. Повторите ч\
                       ерез 15 минут."
-        "500":
-          description: 💥 Внутренняя ошибка сервера
+        "404":
+          description: ❌ Студент или тенант не найден
           content:
             '*/*':
               example:
-                error: Internal server error
+                error: "STUDENT_NOT_FOUND: Student with ID 'student_unknown' not found\
+                  \ in tenant"
   /api/v1/plans:
     get:
       tags:
@@ -946,18 +946,6 @@ paths:
                     status: 400
                     error: Bad Request
                     message: "amount: must be greater than 0"
-        "401":
-          description: 🔐 Неверные учётные данные тенанта
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/PlanResponse"
-        "500":
-          description: 💥 Внутренняя ошибка сервера
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/PlanResponse"
         "201":
           description: ✅ План успешно создан
           content:
@@ -981,6 +969,18 @@ paths:
                     isActive: true
                     createdAt: 2026-03-31T22:27:38.9909694
                     updatedAt: 2026-03-31T22:27:38.9909694
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
       security:
         - TenantAuth: []
   /api/v1/payments/webhook:
@@ -1058,6 +1058,8 @@ paths:
                 status: 500
                 error: Internal Server Error
                 message: YooKassa secret key not configured
+        "200":
+          description: ✅ Вебхук принят и обработан
         "400":
           description: ❌ Ошибка парсинга или обработки вебхука
           content:
@@ -1067,8 +1069,6 @@ paths:
                 status: 400
                 error: Bad Request
                 message: Invalid webhook payload format
-        "200":
-          description: ✅ Вебхук принят и обработан
   /api/v1/customers:
     get:
       tags:
@@ -1189,46 +1189,6 @@ paths:
               $ref: "#/components/schemas/CustomerCreateRequest"
         required: true
       responses:
-        "401":
-          description: 🔐 Неверные учётные данные тенанта
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/CustomerResponse"
-        "201":
-          description: ✅ Клиент успешно создан
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/CustomerResponse"
-              examples:
-                Успешное создание:
-                  description: Успешное создание
-                  value:
-                    id: cust_sys_9k8j7h6g5f4d
-                    tenantId: 6546tds
-                    externalId: user_ivan_2024
-                    email: ivan.petrov@example.com
-                    phone: "+79991234567"
-                    firstName: Иван
-                    lastName: Петров
-                    metadata:
-                      lms_user_id: "12345"
-                      course_group: premium
-                    createdAt: 2026-03-31T22:27:38.9909694
-                    updatedAt: 2026-03-31T22:27:38.9909694
-        "403":
-          description: 🚫 Недостаточно прав
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/CustomerResponse"
-        "500":
-          description: 💥 Внутренняя ошибка сервера
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/CustomerResponse"
         "400":
           description: ❌ Ошибка валидации данных
           content:
@@ -1256,6 +1216,46 @@ paths:
                     status: 400
                     error: Bad Request
                     message: "phone: номер должен быть в формате +79991234567"
+        "201":
+          description: ✅ Клиент успешно создан
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+              examples:
+                Успешное создание:
+                  description: Успешное создание
+                  value:
+                    id: cust_sys_9k8j7h6g5f4d
+                    tenantId: 6546tds
+                    externalId: user_ivan_2024
+                    email: ivan.petrov@example.com
+                    phone: "+79991234567"
+                    firstName: Иван
+                    lastName: Петров
+                    metadata:
+                      lms_user_id: "12345"
+                      course_group: premium
+                    createdAt: 2026-03-31T22:27:38.9909694
+                    updatedAt: 2026-03-31T22:27:38.9909694
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "403":
+          description: 🚫 Недостаточно прав
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/CustomerResponse"
       security:
         - TenantAuth: []
   /api/v1/tenants/payment-settings:
@@ -1305,10 +1305,6 @@ paths:
           description: ✅ Настройки сохранены
         "403":
           description: 🚫 Недостаточно прав
-        "401":
-          description: 🔐 Отсутствуют заголовки авторизации
-        "404":
-          description: ❌ Организация не найдена
         "400":
           description: ❌ Ошибка валидации
           content:
@@ -1329,8 +1325,24 @@ paths:
                     error: Bad Request
                     message: "yookassaSecretKey: Secret key must be a valid YooKassa\
                       \ key (starts with 'live_' or 'test_')"
+        "401":
+          description: 🔐 Отсутствуют заголовки авторизации
+        "404":
+          description: ❌ Организация не найдена
       security:
         - TenantAuth: []
+  /trigger-metrics:
+    get:
+      tags:
+        - test-controller
+      operationId: triggerMetrics
+      responses:
+        "200":
+          description: OK
+          content:
+            '*/*':
+              schema:
+                type: string
   /test-upcoming:
     get:
       tags:
@@ -1646,6 +1658,12 @@ paths:
           schema:
             type: string
       responses:
+        "500":
+          description: 💥 Внутренняя ошибка сервера
+          content:
+            '*/*':
+              example:
+                error: Internal server error
         "401":
           description: 🔐 Неверный или истёкший токен
           content:
@@ -1678,12 +1696,6 @@ paths:
                     currentPeriodEnd: 2026-03-31T23:59:59Z
                     createdAt: 2026-02-15T10:30:00Z
                     updatedAt: 2026-03-01T00:00:01Z
-        "500":
-          description: 💥 Внутренняя ошибка сервера
-          content:
-            '*/*':
-              example:
-                error: Internal server error
   /api/v1/plans/{planId}:
     get:
       tags:
@@ -1718,12 +1730,6 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: ✅ Данные плана получены
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/PlanResponse"
         "404":
           description: ❌ План не найден
           content:
@@ -1732,6 +1738,12 @@ paths:
                 $ref: "#/components/schemas/PlanResponse"
         "403":
           description: 🚫 Доступ запрещён
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PlanResponse"
+        "200":
+          description: ✅ Данные плана получены
           content:
             '*/*':
               schema:
@@ -1790,6 +1802,12 @@ paths:
           schema:
             type: string
       responses:
+        "200":
+          description: ✅ Данные платежа получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
         "401":
           description: 🔐 Неверные учётные данные тенанта
           content:
@@ -1810,12 +1828,6 @@ paths:
                 $ref: "#/components/schemas/PaymentResponse"
         "500":
           description: 💥 Ошибка сервера
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/PaymentResponse"
-        "200":
-          description: ✅ Данные платежа получены
           content:
             '*/*':
               schema:
@@ -2040,12 +2052,6 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: ✅ Логи пользователя получены
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/AuditLogEntry"
         "404":
           description: ❌ Пользователь не найден
           content:
@@ -2054,6 +2060,12 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuditLogEntry"
+        "200":
+          description: ✅ Логи пользователя получены
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AuditLogEntry"
         "403":
           description: 🚫 Доступ запрещён
           content:
@@ -2263,15 +2275,15 @@ paths:
           schema:
             type: string
       responses:
-        "500":
-          description: 💥 Ошибка при вычислении аналитики
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
           content:
             '*/*':
               example:
                 timestamp: 2026-03-31T22:27:38Z
-                status: 500
-                error: Internal Server Error
-                message: "Failed to compute analytics: database timeout"
+                status: 401
+                error: Unauthorized
+                message: Invalid API key or tenant ID
         "200":
           description: ✅ Аналитика получена
           content:
@@ -2328,15 +2340,63 @@ paths:
                           count: 1
                     generatedAt: 2026-03-31T22:27:38.9909694
                     cacheTtl: 900
-        "401":
-          description: 🔐 Неверные учётные данные тенанта
+        "500":
+          description: 💥 Ошибка при вычислении аналитики
           content:
             '*/*':
               example:
                 timestamp: 2026-03-31T22:27:38Z
-                status: 401
-                error: Unauthorized
-                message: Invalid API key or tenant ID
+                status: 500
+                error: Internal Server Error
+                message: "Failed to compute analytics: database timeout"
+      security:
+        - TenantAuth: []
+  /api/v1/analytics/export:
+    get:
+      tags:
+        - 📊 Аналитика
+      summary: 📥 Экспорт аналитики в CSV
+      description: |
+        Скачивает отчёт в формате CSV, совместимый с Excel и Google Sheets.
+
+        **Структура файла:**
+        1. Строка заголовков
+        2. Одна строка с основными метриками за период
+        3. (Опционально) Таблица ежедневной выручки для построения графиков
+      operationId: exportAnalyticsCsv
+      parameters:
+        - name: X-Tenant-ID
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-API-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ✅ CSV-файл сгенерирован
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        "500":
+          description: 💥 Ошибка генерации отчёта
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: 🔐 Неверные учётные данные
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
       security:
         - TenantAuth: []
   /api/v1/access/check:
@@ -2430,6 +2490,15 @@ paths:
           schema:
             type: string
       responses:
+        "401":
+          description: 🔐 Неверные учётные данные тенанта
+          content:
+            '*/*':
+              example:
+                timestamp: 2026-03-31T22:27:38Z
+                status: 401
+                error: Unauthorized
+                message: Invalid API key or tenant ID
         "200":
           description: ✅ Проверка выполнена (доступ есть или нет)
           content:
@@ -2458,21 +2527,6 @@ paths:
                     expiresAt: null
                     status: STUDENT_NOT_FOUND
                     reason: Student with ID 'student_unknown' not found in this tenant
-        "401":
-          description: 🔐 Неверные учётные данные тенанта
-          content:
-            '*/*':
-              example:
-                timestamp: 2026-03-31T22:27:38Z
-                status: 401
-                error: Unauthorized
-                message: Invalid API key or tenant ID
-        "500":
-          description: 💥 Ошибка при проверке доступа
-          content:
-            '*/*':
-              schema:
-                $ref: "#/components/schemas/AccessCheckResponse"
         "403":
           description: 🚫 Студент не принадлежит этому тенанту
           content:
@@ -2482,6 +2536,12 @@ paths:
                 expiresAt: null
                 status: STUDENT_NOT_FOUND
                 reason: Student does not belong to this tenant
+        "500":
+          description: 💥 Ошибка при проверке доступа
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/AccessCheckResponse"
       security:
         - TenantAuth: []
 components:
@@ -2612,19 +2672,19 @@ components:
           type: string
         charset:
           type: string
+        attachment:
+          type: boolean
         inline:
           type: boolean
         formData:
           type: boolean
-        attachment:
-          type: boolean
     ErrorResponse:
       type: object
       properties:
-        headers:
-          $ref: "#/components/schemas/HttpHeaders"
         body:
           $ref: "#/components/schemas/ProblemDetail"
+        headers:
+          $ref: "#/components/schemas/HttpHeaders"
         statusCode:
           $ref: "#/components/schemas/HttpStatusCode"
         typeMessageCode:
@@ -2640,20 +2700,6 @@ components:
     HttpHeaders:
       type: object
       properties:
-        connection:
-          type: array
-          items:
-            type: string
-        ifModifiedSince:
-          type: integer
-          format: int64
-        contentType:
-          $ref: "#/components/schemas/MediaType"
-        contentLength:
-          type: integer
-          format: int64
-        origin:
-          type: string
         empty:
           type: boolean
         location:
@@ -2716,20 +2762,45 @@ components:
         date:
           type: integer
           format: int64
+        contentLength:
+          type: integer
+          format: int64
+        contentType:
+          $ref: "#/components/schemas/MediaType"
+        origin:
+          type: string
+        ifModifiedSince:
+          type: integer
+          format: int64
+        connection:
+          type: array
+          items:
+            type: string
         range:
           type: array
           items:
             $ref: "#/components/schemas/HttpRange"
         contentDisposition:
           $ref: "#/components/schemas/ContentDisposition"
+        cacheControl:
+          type: string
         accept:
           type: array
           items:
             $ref: "#/components/schemas/MediaType"
+        accessControlRequestHeaders:
+          type: array
+          items:
+            type: string
         acceptCharset:
           type: array
           items:
             type: string
+        allow:
+          uniqueItems: true
+          type: array
+          items:
+            $ref: "#/components/schemas/HttpMethod"
         contentLanguage:
           type: object
           properties:
@@ -2773,33 +2844,14 @@ components:
         basicAuth:
           type: string
           writeOnly: true
-        allow:
-          uniqueItems: true
-          type: array
-          items:
-            $ref: "#/components/schemas/HttpMethod"
-        cacheControl:
-          type: string
         etag:
           type: string
         accessControlMaxAge:
           type: integer
           format: int64
-        accessControlRequestMethod:
-          $ref: "#/components/schemas/HttpMethod"
         accessControlAllowOrigin:
           type: string
         accessControlAllowHeaders:
-          type: array
-          items:
-            type: string
-        accessControlAllowCredentials:
-          type: boolean
-        accessControlAllowMethods:
-          type: array
-          items:
-            $ref: "#/components/schemas/HttpMethod"
-        accessControlRequestHeaders:
           type: array
           items:
             type: string
@@ -2807,9 +2859,50 @@ components:
           type: array
           items:
             type: string
-        ifUnmodifiedSince:
+        accessControlAllowCredentials:
+          type: boolean
+        accessControlRequestMethod:
+          $ref: "#/components/schemas/HttpMethod"
+        accessControlAllowMethods:
+          type: array
+          items:
+            $ref: "#/components/schemas/HttpMethod"
+        acceptLanguage:
+          type: array
+          items:
+            type: object
+            properties:
+              range:
+                type: string
+              weight:
+                type: number
+                format: double
+        acceptPatch:
+          type: array
+          items:
+            $ref: "#/components/schemas/MediaType"
+        ifNoneMatch:
+          type: array
+          items:
+            type: string
+        bearerAuth:
+          type: string
+          writeOnly: true
+        vary:
+          type: array
+          items:
+            type: string
+        expires:
           type: integer
           format: int64
+        ifMatch:
+          type: array
+          items:
+            type: string
+        pragma:
+          type: string
+        upgrade:
+          type: string
         acceptLanguageAsLocales:
           type: array
           items:
@@ -2852,42 +2945,9 @@ components:
                 type: string
               iso3Country:
                 type: string
-        upgrade:
-          type: string
-        vary:
-          type: array
-          items:
-            type: string
-        expires:
+        ifUnmodifiedSince:
           type: integer
           format: int64
-        pragma:
-          type: string
-        ifMatch:
-          type: array
-          items:
-            type: string
-        acceptPatch:
-          type: array
-          items:
-            $ref: "#/components/schemas/MediaType"
-        acceptLanguage:
-          type: array
-          items:
-            type: object
-            properties:
-              range:
-                type: string
-              weight:
-                type: number
-                format: double
-        bearerAuth:
-          type: string
-          writeOnly: true
-        ifNoneMatch:
-          type: array
-          items:
-            type: string
     HttpMethod:
       type: object
     HttpRange:
@@ -2897,13 +2957,13 @@ components:
       properties:
         error:
           type: boolean
-        is5xxServerError:
+        is2xxSuccessful:
           type: boolean
         is4xxClientError:
           type: boolean
-        is1xxInformational:
+        is5xxServerError:
           type: boolean
-        is2xxSuccessful:
+        is1xxInformational:
           type: boolean
         is3xxRedirection:
           type: boolean
@@ -2925,9 +2985,9 @@ components:
           type: string
         concrete:
           type: boolean
-        wildcardType:
-          type: boolean
         wildcardSubtype:
+          type: boolean
+        wildcardType:
           type: boolean
         subtypeSuffix:
           type: string
@@ -3123,30 +3183,205 @@ components:
     AnalyticsResponse:
       type: object
       properties:
-        mrr:
+        period:
+          $ref: "#/components/schemas/PeriodInfo"
+        revenue:
+          $ref: "#/components/schemas/RevenueMetrics"
+        subscriptions:
+          $ref: "#/components/schemas/SubscriptionMetrics"
+        customers:
+          $ref: "#/components/schemas/CustomerMetrics"
+        payments:
+          $ref: "#/components/schemas/PaymentMetrics"
+        generatedAt:
+          type: string
+          description: Время генерации отчёта
+          format: date-time
+        cacheTtl:
+          type: integer
+          description: Время жизни кэша в секундах
+          format: int32
+          example: 900
+      description: Сводная бизнес-аналитика организации
+    CustomerMetrics:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Всего уникальных клиентов
+          format: int32
+          example: 156
+        newCustomers:
+          type: integer
+          description: Новых клиентов за период
+          format: int32
+          example: 12
+        activePayers:
+          type: integer
+          description: Клиентов с успешными платежами
+          format: int32
+          example: 42
+        retentionRate:
           type: number
-        activeSubscriptions:
+          description: Коэффициент удержания (%)
+          format: double
+          example: 94.2
+      description: Метрики клиентов
+    FailureReason:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Код причины
+          example: insufficient_funds
+        count:
           type: integer
-          format: int64
-        totalCustomers:
+          description: Количество случаев
+          format: int32
+          example: 2
+      description: Причина неудачного платежа
+    PaymentMetrics:
+      type: object
+      properties:
+        successful:
           type: integer
+          description: Успешных платежей
+          format: int32
+          example: 45
+        failed:
+          type: integer
+          description: Неудачных попыток
+          format: int32
+          example: 3
+        refunded:
+          type: integer
+          description: Возвратов средств
+          format: int32
+          example: 1
+        conversionRate:
+          type: number
+          description: Конверсия успешных платежей (%)
+          format: double
+          example: 93.8
+        failureReasons:
+          type: array
+          description: Причины неудачных платежей
+          items:
+            $ref: "#/components/schemas/FailureReason"
+      description: Метрики платежей
+    PeriodInfo:
+      type: object
+      properties:
+        start:
+          type: string
+          description: Начало текущего периода
+          example: 2026-03-01
+        end:
+          type: string
+          description: Конец текущего периода
+          example: 2026-03-31
+        previousStart:
+          type: string
+          description: Начало сравнительного периода
+          example: 2026-02-01
+        previousEnd:
+          type: string
+          description: Конец сравнительного периода
+          example: 2026-02-29
+      description: Период отчётности
+    PlanDistribution:
+      type: object
+      properties:
+        planCode:
+          type: string
+          description: Код тарифного плана
+          example: premium_monthly
+        count:
+          type: integer
+          description: Количество подписок
+          format: int32
+          example: 14
+      description: Распределение по плану
+    RevenueMetrics:
+      type: object
+      properties:
+        mrr:
+          type: integer
+          description: MRR — Monthly Recurring Revenue
           format: int64
+          example: 447000
+        arr:
+          type: integer
+          description: ARR — Annual Recurring Revenue
+          format: int64
+          example: 5364000
+        totalRevenue:
+          type: integer
+          description: Общая выручка за период
+          format: int64
+          example: 1341000
+        averageCheck:
+          type: integer
+          description: Средний чек
+          format: int64
+          example: 149000
+        growth:
+          type: number
+          description: Рост относительно прошлого периода (%)
+          format: double
+          example: 12.5
+        currency:
+          type: string
+          description: Код валюты
+          example: RUB
+        timeseries:
+          type: array
+          description: Временной ряд выручки по дням
+          items:
+            $ref: "#/components/schemas/TimeseriesPoint"
+      description: Метрики выручки (в минорной валюте)
+    SubscriptionMetrics:
+      type: object
+      properties:
+        active:
+          type: integer
+          description: Активные подписки на конец периода
+          format: int32
+          example: 42
+        newSubscriptions:
+          type: integer
+          description: Новые подписки за период
+          format: int32
+          example: 8
+        canceled:
+          type: integer
+          description: Отменённые подписки за период
+          format: int32
+          example: 2
         churnRate:
           type: number
-        subscriptionsByPlan:
-          type: object
-          additionalProperties:
-            type: integer
-            format: int64
-        revenueByMonth:
-          type: object
-          additionalProperties:
-            type: number
-        mrrGrowthRate:
-          type: number
-        newSubscriptionsLast30Days:
+          description: Коэффициент оттока (%)
+          format: double
+          example: 4.8
+        byPlan:
+          type: array
+          description: Распределение по тарифным планам
+          items:
+            $ref: "#/components/schemas/PlanDistribution"
+      description: Метрики подписок
+    TimeseriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          description: Дата
+          example: 2026-03-01
+        value:
           type: integer
+          description: Значение метрики
           format: int64
+          example: 44700
+      description: Точка временного ряда
     AccessCheckResponse:
       type: object
       properties:

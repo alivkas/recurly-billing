@@ -2,7 +2,7 @@ SELECT id, next_billing_date FROM subscriptions WHERE tenant_id = 'moscow_digita
 
 UPDATE subscriptions
 SET next_billing_date = CURRENT_DATE
-WHERE id = 'abad04c9-e49c-4aea-ae34-f45baaff06d8';
+WHERE id = 'ba80aba6-1e75-43a2-a5fc-268d31af3619';
 
 UPDATE subscriptions
 SET trial_end = CURRENT_DATE
